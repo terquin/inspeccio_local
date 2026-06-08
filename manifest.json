@@ -1,7 +1,7 @@
 {
 "name": "Inspecció de Camp",
 "short_name": "Inspecció",
-"start_url": "./index.html",
+"start_url": "/",
 "display": "fullscreen",
 "background_color": "#f3f4f6",
 "theme_color": "#2563eb",
