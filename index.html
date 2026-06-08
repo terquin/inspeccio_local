@@ -4,13 +4,11 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Inspecció de Camp</title>
-    
-    <script src="https://cdn.jsdelivr.net/npm/piexifjs@1.0.6/piexif.js"></script> 
 
-    <!-- Manifest PWA Estàtic per forçar el mode pantalla completa (sense barra) -->
-    <link rel="manifest" href="data:application/manifest+json;base64,eyJuYW1lIjoiSW5zcGVjY2nDsyBkZSBDYW1wIiwic2hvcnRfbmFtZSI6Ikluc3BlY2Npw7MiLCJzdGFydF91cmwiOiIuIiwiZGlzcGxheSI6InN0YW5kYWxvbmUiLCJiYWNrZ3JvdW5kX2NvbG9yIjoiI2YzZjRmNiIsInRoZW1lX2NvbG9yIjoiIzI1NjNlYiIsImljb25zIjpbeyJzcmMiOiJodHRwczovL3VwbG9hZC53aWtpbWVkaWEub3JnL3dpa2lwZWRpYS9jb21tb25zL3RodW1iL2UvZWQvTWFwX3Bpbl9pY29uLnN2Zy8xOTJweC1NYXBfcGluX2ljb24uc3ZnLnBuZyIsInNpemVzIjoiMTkyeDE5MiIsInR5cGUiOiJpbWFnZS9wbmcifSx7InNyYyI6Imh0dHBzOi8vdXBlob2FkLndpa2ltZWRpYS5vcmcvd2lraXBlZGlhL2NvbW1vbnMvdGh1bWIvZS9lZC9NYXBfcGluX2ljb24uc3ZnLzUxMnB4LU1hcF9waW5faWNvbi5zdmcucG5nIiwic2l6ZXMiOiI1MTJ4NTEyIiwidHlwZSI6ImltYWdlL3BuZyJ9XX0=">
+    <!-- Enllaç a l'arxiu manifest físic -->
+    <link rel="manifest" href="manifest.json">
 
-    <!-- Meta tags per forçar mode App en iOS i Android -->
+    <!-- Meta tags per a iOS i Android -->
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -19,7 +17,20 @@
     <link rel="apple-touch-icon" href="https://upload.wikimedia.org/wikipedia/commons/thumb/e/ed/Map_pin_icon.svg/512px-Map_pin_icon.svg.png">
     <link rel="icon" type="image/png" sizes="512x512" href="https://upload.wikimedia.org/wikipedia/commons/thumb/e/ed/Map_pin_icon.svg/512px-Map_pin_icon.svg.png">
 
+    <!-- Registre del Service Worker físic -->
+    <script>
+        // Només registra el SW si estem en un servidor web real (http/https) per evitar errors locals o de previsualització
+        if ('serviceWorker' in navigator && window.location.protocol.startsWith('http')) {
+            window.addEventListener('load', () => {
+                navigator.serviceWorker.register('sw.js')
+                    .then(reg => console.log('Service Worker registrat amb èxit'))
+                    .catch(err => console.error('Error al registrar Service Worker', err));
+            });
+        }
+    </script>
+
     <!-- Llibreries externes -->
+    <script src="https://cdn.jsdelivr.net/npm/piexifjs@1.0.6/piexif.js"></script> 
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin=""/>
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
@@ -28,6 +39,7 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/proj4js/2.9.0/proj4.js"></script>
 
     <style>
+        /* Animació del micròfon escoltant */
         @keyframes pulse-mic {
             0% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.4); }
             70% { box-shadow: 0 0 0 8px rgba(239, 68, 68, 0); }
@@ -120,6 +132,7 @@
             <button onclick="locateUser()" class="text-blue-500 p-1"><i data-lucide="locate" class="w-4 h-4"></i></button>
         </div>
 
+        <!-- CONTENIDOR DINÀMIC (Camps personalitzats) -->
         <div id="dynamic-fields-container" class="flex flex-col gap-4"></div>
         
         <div class="flex flex-col gap-1">
@@ -184,6 +197,7 @@
             <input type="number" id="custom-start-num" min="1" onchange="updateCustomStartNum(this.value)" class="w-16 border border-gray-300 rounded-md p-1.5 text-center font-bold text-blue-600 outline-none">
         </div>
 
+        <!-- SECCIÓ GESTIÓ CAMPS PERSONALITZATS -->
         <div class="h-px bg-gray-100 my-2"></div>
         <div class="bg-blue-50 border border-blue-200 rounded-lg p-3 shadow-sm">
             <h3 class="font-bold text-blue-800 text-sm mb-2 flex items-center gap-1">
@@ -351,7 +365,7 @@ function showNotification(msg, isError = false) {
     setTimeout(() => { n.style.opacity = '0'; setTimeout(() => n.remove(), 500); }, 3500);
 }
 
-// ── GESTIÓ CAMPS PERSONALITZATS (TOTS ELS CAMPS) ──────────────
+// ── GESTIÓ CAMPS PERSONALITZATS ───────────────────────────────
 function handleCfTypeChange(sel) {
     const optInput = document.getElementById('new-cf-options');
     if (sel.value === 'select') optInput.classList.remove('hidden');
@@ -417,7 +431,7 @@ function addCustomField() {
 }
 
 function removeCustomField(id) {
-    if (!confirm('Segur que vols eliminar aquest camp de la teva plantilla? (Els punts ja guardats mantindran les dades en els seus arxius)')) return;
+    if (!confirm('Segur que vols eliminar aquest camp de la teva plantilla?')) return;
     customFields = customFields.filter(cf => cf.id !== id);
     localStorage.setItem('custom_fields', JSON.stringify(customFields));
     renderAdminCustomFields();
@@ -479,7 +493,7 @@ function renderDynamicFormFields(props = {}) {
     }
 }
 
-// ── COMPRESSIÓ + INJECCIÓ EXIF GPS (ZERO RAM OVERHEAD) ────────
+// ── COMPRESSIÓ + INJECCIÓ EXIF GPS ────────────────────────────
 function compressWithExif(fileUrl, quality, maxDim) {
     return new Promise(async (resolve, reject) => {
         let img;
@@ -1270,7 +1284,6 @@ async function importData(event) {
             let fotosCount = 0;
 
             for (let f of data.features) {
-                // Migració per a arxius antics exportats prèviament
                 if (f.properties && f.properties.num_punt !== undefined) {
                     f.properties.FID = f.properties.num_punt;
                     delete f.properties.num_punt;
@@ -1326,7 +1339,6 @@ async function importData(event) {
                 const data = JSON.parse(e.target.result);
                 if (data.type !== 'FeatureCollection' || !data.features) throw new Error('Format no vàlid');
                 const imported = data.features.map(f => {
-                    // Migració per a arxius antics exportats prèviament
                     if (f.properties && f.properties.num_punt !== undefined) {
                         f.properties.FID = f.properties.num_punt;
                         delete f.properties.num_punt;
