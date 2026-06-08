@@ -1,0 +1,20 @@
+{
+"name": "Inspecció de Camp",
+"short_name": "Inspecció",
+"start_url": "./index.html",
+"display": "standalone",
+"background_color": "#f3f4f6",
+"theme_color": "#2563eb",
+"icons": [
+{
+"src": "https://upload.wikimedia.org/wikipedia/commons/thumb/e/ed/Map_pin_icon.svg/192px-Map_pin_icon.svg.png",
+"sizes": "192x192",
+"type": "image/png"
+},
+{
+"src": "https://upload.wikimedia.org/wikipedia/commons/thumb/e/ed/Map_pin_icon.svg/512px-Map_pin_icon.svg.png",
+"sizes": "512x512",
+"type": "image/png"
+}
+]
+}
