@@ -1,0 +1,1391 @@
+<!DOCTYPE html>
+<html lang="ca">
+<head>
+    <script src="https://cdn.jsdelivr.net/npm/piexifjs@1.0.6/piexif.js"></script> 
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Inspecció de Camp</title>
+
+    <link rel="manifest" href="data:application/manifest+json;base64,eyJuYW1lIjoiSW5zcGVjY2nDsyBkZSBDYW1wIiwic2hvcnRfbmFtZSI6Ikluc3BlY2Npw7MiLCJzdGFydF91cmwiOiIuIiwiZGlzcGxheSI6InN0YW5kYWxvbmUiLCJiYWNrZ3JvdW5kX2NvbG9yIjoiI2YzZjRmNiIsInRoZW1lX2NvbG9yIjoiIzI1NjNlYiIsImljb25zIjpbeyJzcmMiOiJodHRwczovL3VwbG9hZC53aWtpbWVkaWEub3JnL3dpa2lwZWRpYS9jb21tb25zL3RodW1iL2UvZWQvTWFwX3Bpbl9pY29uLnN2Zy8xOTJweC1NYXBfcGluX2ljb24uc3ZnLnBuZyIsInNpemVzIjoiMTkyeDE5MiIsInR5cGUiOiJpbWFnZS9wbmcifSx7InNyYyI6Imh0dHBzOi8vdXBlob2FkLndpa2ltZWRpYS5vcmcvd2lraXBlZGlhL2NvbW1vbnMvdGh1bWIvZS9lZC9NYXBfcGluX2ljb24uc3ZnLzUxMnB4LU1hcF9waW5faWNvbi5zdmcucG5nIiwic2l6ZXMiOiI1MTJ4NTEyIiwidHlwZSI6ImltYWdlL3BuZyJ9XX0=">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="Inspecció">
+    <meta name="theme-color" content="#2563eb">
+    <link rel="apple-touch-icon" href="https://upload.wikimedia.org/wikipedia/commons/thumb/e/ed/Map_pin_icon.svg/512px-Map_pin_icon.svg.png">
+    <link rel="icon" type="image/png" sizes="512x512" href="https://upload.wikimedia.org/wikipedia/commons/thumb/e/ed/Map_pin_icon.svg/512px-Map_pin_icon.svg.png">
+
+    <script>
+        if ('serviceWorker' in navigator) {
+            window.addEventListener('load', () => {
+                const swCode = `
+                    self.addEventListener('install', e => self.skipWaiting());
+                    self.addEventListener('activate', e => self.clients.claim());
+                    self.addEventListener('fetch', e => {});
+                `;
+                const blob = new Blob([swCode], {type: 'application/javascript'});
+                const swUrl = URL.createObjectURL(blob);
+                navigator.serviceWorker.register(swUrl).catch(() => {});
+            });
+        }
+    </script>
+
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin=""/>
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/proj4js/2.9.0/proj4.js"></script>
+
+    <style>
+        @keyframes pulse-mic {
+            0% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.4); }
+            70% { box-shadow: 0 0 0 8px rgba(239, 68, 68, 0); }
+            100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0); }
+        }
+        .mic-recording {
+            background-color: #fee2e2 !important;
+            color: #ef4444 !important;
+            border-color: #fca5a5 !important;
+            animation: pulse-mic 1.5s infinite;
+        }
+
+        body, html { margin:0; padding:0; height:100%; width:100%; overflow:hidden; background:#f3f4f6; }
+        #map { height:100vh; width:100%; z-index:1; }
+        ::-webkit-scrollbar { width:6px; }
+        ::-webkit-scrollbar-thumb { background:#cbd5e1; border-radius:10px; }
+        #notification-area {
+            position:fixed; top:20px; left:50%; transform:translateX(-50%);
+            z-index:9999; width:90%; max-width:400px;
+        }
+        .notification {
+            background:#10b981; color:white; padding:12px; border-radius:8px;
+            margin-bottom:10px; text-align:center; box-shadow:0 4px 6px rgba(0,0,0,.1);
+            transition:opacity .5s ease;
+        }
+        .notification.error { background:#ef4444; }
+        .notification.info  { background:#3b82f6; }
+        .popup-content { font-size:13px; min-width:200px; max-width:280px; }
+        .popup-content b { color:#374151; }
+        .popup-content .popup-id {
+            background:#eff6ff; border:1px solid #bfdbfe; border-radius:4px;
+            padding:2px 6px; font-size:11px; color:#1d4ed8; font-family:monospace;
+            margin-bottom:6px; display:inline-block;
+        }
+        .popup-content .popup-row { border-bottom:1px solid #f3f4f6; padding:3px 0; }
+        .popup-content .popup-fotos-label { font-size:11px; color:#6b7280; margin-top:4px; }
+    </style>
+</head>
+<body class="relative">
+
+<div id="notification-area"></div>
+<div id="map"></div>
+
+<div class="fixed bottom-8 right-4 flex flex-col gap-4 z-[400]">
+    <button onclick="openToolsPanel()" title="Gestió de dades"
+        class="bg-white p-3 rounded-full shadow-lg text-gray-700 hover:bg-gray-100 flex justify-center items-center">
+        <i data-lucide="settings"></i>
+    </button>
+    <button onclick="locateUser()" title="Localitzar-me"
+        class="bg-white p-3 rounded-full shadow-lg text-blue-600 hover:bg-gray-100 flex justify-center items-center">
+        <i data-lucide="crosshair"></i>
+    </button>
+    <button onclick="openNewPointForm()" title="Nou punt"
+        class="bg-blue-600 text-white p-4 rounded-full shadow-lg hover:bg-blue-700 flex justify-center items-center transition transform active:scale-95">
+        <i data-lucide="plus" class="w-8 h-8"></i>
+    </button>
+</div>
+
+<div id="backdrop" class="fixed inset-0 bg-black/40 z-[500] hidden" onclick="closeAllPanels()"></div>
+
+<div id="form-panel" class="fixed inset-x-0 bottom-0 z-[600] bg-white rounded-t-3xl shadow-2xl transform translate-y-full transition-transform duration-300 max-h-[92vh] flex flex-col">
+    <div class="p-5 border-b flex justify-between items-center sticky top-0 bg-white rounded-t-3xl z-10">
+        <h1 class="text-xl font-bold text-gray-800 flex items-center gap-2">
+            <i data-lucide="map-pin" class="text-red-500"></i> <span id="form-title-text">Nou Punt</span>
+        </h1>
+        <div class="flex items-center gap-2">
+            <span id="new-point-id" class="text-xs bg-blue-50 text-blue-600 font-mono px-2 py-1 rounded-full border border-blue-200"></span>
+            <button id="btn-delete-point" onclick="deleteCurrentPoint()" class="hidden text-red-500 hover:bg-red-50 p-2 rounded-full mr-1">
+                <i data-lucide="trash-2"></i>
+            </button>
+            <button onclick="closeAllPanels()" class="text-gray-500 hover:bg-gray-100 p-2 rounded-full">
+                <i data-lucide="x"></i>
+            </button>
+        </div>
+    </div>
+    <div class="p-5 overflow-y-auto flex flex-col gap-4">
+        
+        <!-- Punts Fixes Essentials (Revisat i Coordenades) -->
+        <div class="flex items-center gap-3 bg-gray-50 p-3 rounded-xl border border-gray-200">
+            <input type="checkbox" id="revisat" class="w-6 h-6 text-blue-600 border-gray-300 rounded focus:ring-blue-500 cursor-pointer">
+            <label for="revisat" class="font-bold text-gray-700 cursor-pointer">Marcar com a REVISAT</label>
+        </div>
+
+        <div class="bg-blue-50 p-3 rounded-lg text-xs text-blue-700" id="form-info-gps">
+            <i data-lucide="info" class="inline w-4 h-4"></i> Si no tens GPS, tanca i toca el mapa per situar-te.
+        </div>
+        
+        <div class="bg-gray-50 p-3 rounded-lg text-sm text-gray-600 font-mono flex justify-between items-center">
+            <div><strong>X:</strong> <span id="lat-display">Buscant...</span></div>
+            <div><strong>Y:</strong> <span id="lon-display">Buscant...</span></div>
+            <button onclick="locateUser()" class="text-blue-500 p-1"><i data-lucide="locate" class="w-4 h-4"></i></button>
+        </div>
+
+        <!-- CONTENIDOR DINÀMIC (Tots els camps s'autogeneren aquí) -->
+        <div id="dynamic-fields-container" class="flex flex-col gap-4"></div>
+        
+        <!-- Fotografies -->
+        <div class="flex flex-col gap-1">
+            <label class="font-semibold text-gray-700 text-sm">
+                Fotografies
+                <span class="text-gray-400 font-normal text-xs" id="edit-photo-info"></span>
+                <span class="text-gray-400 font-normal text-xs ml-1">(comprimides automàticament)</span>
+            </label>
+            <div class="flex items-center gap-2 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 text-xs text-amber-800">
+                <i data-lucide="image" class="w-3 h-3 shrink-0"></i>
+                <label for="quality-select" class="font-semibold shrink-0">Qualitat:</label>
+               <select id="quality-select" class="bg-transparent outline-none font-medium text-amber-900 flex-1">
+                 <option value="0.3">Mínima (~80 KB)</option>
+                 <option value="0.5">Lleugera (~150 KB)</option>
+                 <option value="0.7" selected>Normal (~300 KB)</option>
+                 <option value="0.85">Alta (~600 KB)</option>
+                 <option value="1.0">Màxima (sense pèrdua)</option>
+               </select> 
+                <span id="quality-size-hint" class="text-amber-600 shrink-0">~300 KB</span>
+            </div>
+            <div class="flex gap-2 mt-1">
+                <label class="flex-1 border-2 border-dashed border-blue-300 bg-blue-50 text-blue-700 font-semibold py-3 px-2 rounded-lg flex flex-col items-center justify-center gap-1 cursor-pointer hover:bg-blue-100 transition">
+                    <i data-lucide="camera" class="w-6 h-6"></i>
+                    <span class="text-sm">Càmera</span>
+                    <input type="file" accept="image/*" capture="environment" class="hidden" onchange="handlePhoto(event)">
+                </label>
+                <label class="flex-1 border-2 border-dashed border-purple-300 bg-purple-50 text-purple-700 font-semibold py-3 px-2 rounded-lg flex flex-col items-center justify-center gap-1 cursor-pointer hover:bg-purple-100 transition">
+                    <i data-lucide="image" class="w-6 h-6"></i>
+                    <span class="text-sm">Galeria</span>
+                    <input type="file" accept="image/*" multiple class="hidden" onchange="handlePhoto(event)">
+                </label>
+            </div>
+            <div id="photo-status" class="text-center text-xs text-gray-500 font-medium mt-1">Sense fotos noves</div>
+            <div id="photo-preview-container" class="hidden mt-2 grid grid-cols-2 gap-2"></div>
+        </div>
+
+        <button onclick="savePoint()" class="w-full bg-blue-600 text-white py-4 mt-2 rounded-xl font-bold flex items-center justify-center gap-2 hover:bg-blue-700 transition shadow-md">
+            <i data-lucide="save"></i> <span id="btn-save-text">Guardar Punt al Mapa</span>
+        </button>
+    </div>
+</div>
+
+<div id="tools-panel" class="fixed inset-x-0 bottom-0 z-[600] bg-white rounded-t-3xl shadow-2xl transform translate-y-full transition-transform duration-300 max-h-[85vh] flex flex-col">
+    <div class="p-5 border-b flex justify-between items-center sticky top-0 bg-white rounded-t-3xl z-10">
+        <h1 class="text-xl font-bold text-gray-800 flex items-center gap-2">
+            <i data-lucide="database" class="text-gray-500"></i> Gestió de Dades
+        </h1>
+        <button onclick="closeAllPanels()" class="text-gray-500 hover:bg-gray-100 p-2 rounded-full"><i data-lucide="x"></i></button>
+    </div>
+    <div class="p-5 overflow-y-auto flex flex-col gap-3">
+        <div class="text-center font-semibold text-gray-700 bg-gray-50 border border-gray-200 rounded-lg p-3">
+            Punts emmagatzemats: <span id="points-count" class="text-blue-600 text-xl font-bold">0</span>
+        </div>
+        
+        <div class="flex flex-col gap-2 bg-white border border-gray-200 rounded-lg p-3 shadow-sm">
+            <label for="layer-name-input" class="text-sm font-semibold text-gray-700">Nom de la capa (prefix arxius/carpeta):</label>
+            <input type="text" id="layer-name-input" onchange="updateLayerName(this.value)" class="border border-gray-300 rounded-md p-2 outline-none focus:ring-2 focus:ring-blue-500">
+        </div>
+
+        <div class="flex items-center justify-between bg-white border border-gray-200 rounded-lg p-3 shadow-sm">
+            <label for="custom-start-num" class="text-sm font-semibold text-gray-700">Començar numeració pel punt:</label>
+            <input type="number" id="custom-start-num" min="1" onchange="updateCustomStartNum(this.value)" class="w-16 border border-gray-300 rounded-md p-1.5 text-center font-bold text-blue-600 outline-none">
+        </div>
+
+        <!-- SECCIÓ GESTIÓ CAMPS PERSONALITZATS -->
+        <div class="h-px bg-gray-100 my-2"></div>
+        <div class="bg-blue-50 border border-blue-200 rounded-lg p-3 shadow-sm">
+            <h3 class="font-bold text-blue-800 text-sm mb-2 flex items-center gap-1">
+                <i data-lucide="list-plus" class="w-4 h-4"></i> Camps del Formulari
+            </h3>
+            <p class="text-xs text-blue-600 mb-3">Tots els camps del formulari. Afegeix, edita o elimina com vulguis.</p>
+            
+            <div id="custom-fields-admin-list" class="flex flex-col gap-2 mb-3"></div>
+            
+            <div class="flex gap-2">
+                <input type="text" id="new-cf-name" placeholder="Nom del camp nou" class="flex-1 border border-gray-300 rounded-md p-2 outline-none text-sm focus:ring-2 focus:ring-blue-500">
+                <select id="new-cf-type" onchange="handleCfTypeChange(this)" class="border border-gray-300 rounded-md p-2 text-sm outline-none focus:ring-2 focus:ring-blue-500 bg-white">
+                    <option value="text">Text curt</option>
+                    <option value="number">Número</option>
+                    <option value="textarea">Text llarg (amb veu)</option>
+                    <option value="select">Desplegable</option>
+                </select>
+                <button onclick="addCustomField()" class="bg-blue-600 text-white px-3 py-2 rounded-md hover:bg-blue-700 transition">
+                    <i data-lucide="plus" class="w-4 h-4"></i>
+                </button>
+            </div>
+            <input type="text" id="new-cf-options" class="hidden mt-2 w-full border border-gray-300 rounded-md p-2 outline-none text-sm focus:ring-2 focus:ring-blue-500" placeholder="Opcions separades per coma (ex: Bo,Regular,Dolent)">
+        </div>
+
+        <div class="h-px bg-gray-100 my-2"></div>
+        <button onclick="exportDataAsZip()" class="w-full bg-green-600 text-white py-3 rounded-lg font-bold flex items-center justify-center gap-2 shadow-sm">
+            <i data-lucide="folder-down"></i> Exportar ZIP (GeoJSON + Fotos)
+        </button>
+        <button onclick="exportGeoJSONonly()" class="w-full bg-teal-600 text-white py-3 rounded-lg font-bold flex items-center justify-center gap-2 shadow-sm mt-2">
+            <i data-lucide="file-down"></i> Exportar GeoJSON directe
+        </button>
+        <button onclick="clearData()" class="w-full bg-red-50 text-red-600 py-3 rounded-lg font-semibold flex items-center justify-center gap-2 border border-red-200 mt-4">
+            <i data-lucide="trash-2"></i> Esborrar totes les dades
+        </button>
+        <button onclick="cleanCache()" class="w-full bg-orange-50 text-orange-600 py-3 rounded-lg font-semibold flex items-center justify-center gap-2 border border-orange-200 mt-2">
+            <i data-lucide="cpu"></i> Netejar memòria cau (Caché)
+        </button>
+
+        <div class="h-px bg-gray-100 my-2"></div>
+        
+        <button onclick="document.getElementById('import-file').click()" class="w-full bg-indigo-50 text-indigo-600 py-3 rounded-lg font-semibold flex items-center justify-center gap-2 border border-indigo-200 mt-2">
+            <i data-lucide="folder-up"></i> Importar ZIP / GeoJSON
+        </button>
+        <input type="file" id="import-file" accept=".zip,.geojson,application/geo+json,application/zip" class="hidden" onchange="importData(event)">
+  
+    </div>
+</div>
+
+<div id="photo-viewer-modal" class="fixed inset-0 z-[800] hidden items-center justify-center bg-black/90">
+    <button onclick="closePhotoViewer()" class="absolute top-4 right-4 text-white bg-black/50 rounded-full p-2 z-10">
+        <i data-lucide="x" class="w-6 h-6"></i>
+    </button>
+    <div id="photo-viewer-hint" class="absolute bottom-6 left-1/2 -translate-x-1/2 text-white/60 text-xs z-10 pointer-events-none">
+        Pinça o scroll per fer zoom · Doble clic per resetar
+    </div>
+    <div id="photo-viewer-container" style="overflow:hidden;width:100%;height:100%;display:flex;align-items:center;justify-content:center;cursor:grab;">
+        <img id="photo-viewer-img" src="" style="max-width:100%;max-height:90vh;border-radius:8px;object-contain;transform-origin:center center;transition:transform 0.1s ease;user-select:none;pointer-events:none;">
+    </div>
+</div>
+
+<script>
+lucide.createIcons();
+
+document.getElementById('quality-select').addEventListener('change', function () {
+    const hints = { '0.3': '~80 KB', '0.5': '~150 KB', '0.7': '~300 KB', '0.85': '~600 KB', '1.0': 'original' };
+    document.getElementById('quality-size-hint').textContent = hints[this.value] || '';
+});
+
+// ── INDEXEDDB ─────────────────────────────────────────────────
+const DB_NAME    = 'InspeccioCampDB';
+const STORE_NAME = 'photos';
+let db;
+
+function initDB() {
+    return new Promise((resolve, reject) => {
+        const req = indexedDB.open(DB_NAME, 1);
+        req.onerror = () => reject('IndexedDB error');
+        req.onsuccess = e => { db = e.target.result; resolve(db); };
+        req.onupgradeneeded = e => {
+            db = e.target.result;
+            if (!db.objectStoreNames.contains(STORE_NAME))
+                db.createObjectStore(STORE_NAME);
+        };
+    });
+}
+
+function saveBlobToDB(key, blob) {
+    return new Promise((resolve, reject) => {
+        if (!db) return reject('DB no iniciada');
+        const tx = db.transaction([STORE_NAME], 'readwrite');
+        tx.objectStore(STORE_NAME).put(blob, key);
+        tx.oncomplete = () => resolve();
+        tx.onerror    = () => reject(tx.error);
+    });
+}
+
+function getBlobFromDB(key) {
+    return new Promise(resolve => {
+        if (!db) return resolve(null);
+        const tx  = db.transaction([STORE_NAME], 'readonly');
+        const req = tx.objectStore(STORE_NAME).get(key);
+        req.onsuccess = () => resolve(req.result || null);
+        req.onerror   = () => resolve(null);
+    });
+}
+
+function deleteBlobFromDB(key) {
+    return new Promise(resolve => {
+        if (!db) return resolve();
+        const tx = db.transaction([STORE_NAME], 'readwrite');
+        tx.objectStore(STORE_NAME).delete(key);
+        tx.oncomplete = () => resolve();
+        tx.onerror    = () => resolve();
+    });
+}
+
+// ── VARIABLES GLOBALS I CAMPS DINÀMICS ────────────────────────
+let map, userMarker;
+let currentLat = null, currentLon = null;
+let savedPoints   = [];
+let editingPointId = null;
+
+let layerName = localStorage.getItem('layer_name') || 'inspeccio';
+let customFields = JSON.parse(localStorage.getItem('custom_fields'));
+
+// Migració per evitar col·lisió de nom amb el nou FID automàtic
+if (customFields && customFields.length > 0) {
+    let changed = false;
+    customFields.forEach(cf => {
+        if (cf.label === 'FID') {
+            cf.label = 'Codi Extra'; // Reanomenem l'antic camp manual
+            changed = true;
+        }
+    });
+    if (changed) localStorage.setItem('custom_fields', JSON.stringify(customFields));
+}
+
+// Si no hi ha camps configurats, inicialitzem els camps per defecte
+if (!customFields || customFields.length === 0) {
+    customFields = [
+        { id: 'cf_codi', label: 'Codi Extra', type: 'number' },
+        { id: 'cf_tipus', label: 'Tipus', type: 'select', options: 'Incidència,Element inventariat,Mostra,Observació,Altres' },
+        { id: 'cf_estat', label: 'Estat', type: 'select', options: 'Bo,Regular,Dolent' },
+        { id: 'cf_notes', label: 'Apunts i Observacions', type: 'textarea' }
+    ];
+    localStorage.setItem('custom_fields', JSON.stringify(customFields));
+}
+
+// ── PROJ4 ─────────────────────────────────────────────────────
+proj4.defs('EPSG:25831', '+proj=utm +zone=31 +ellps=GRS80 +towgs84=0,0,0,0,0,0,0 +units=m +no_defs');
+function wgs84ToUtm31(lon, lat) {
+    const [x, y] = proj4('EPSG:4326', 'EPSG:25831', [lon, lat]);
+    return { x: Math.round(x * 100) / 100, y: Math.round(y * 100) / 100 };
+}
+function utm31ToWgs84(x, y) {
+    const [lon, lat] = proj4('EPSG:25831', 'EPSG:4326', [x, y]);
+    return { lat, lon };
+}
+
+// ── NOTIFICACIÓ ───────────────────────────────────────────────
+function showNotification(msg, isError = false) {
+    const area = document.getElementById('notification-area');
+    const n    = document.createElement('div');
+    n.className = `notification ${isError ? 'error' : ''}`;
+    n.innerText = msg;
+    area.appendChild(n);
+    setTimeout(() => { n.style.opacity = '0'; setTimeout(() => n.remove(), 500); }, 3500);
+}
+
+// ── GESTIÓ CAMPS PERSONALITZATS (TOTS ELS CAMPS) ──────────────
+function handleCfTypeChange(sel) {
+    const optInput = document.getElementById('new-cf-options');
+    if (sel.value === 'select') optInput.classList.remove('hidden');
+    else optInput.classList.add('hidden');
+}
+
+function renderAdminCustomFields() {
+    const container = document.getElementById('custom-fields-admin-list');
+    if (!container) return;
+    container.innerHTML = '';
+    
+    if (customFields.length === 0) {
+        container.innerHTML = '<div class="text-xs text-blue-500 italic text-center py-2">Cap camp. Pots crear-ne un.</div>';
+        return;
+    }
+    
+    customFields.forEach(cf => {
+        let typeBadge = cf.type;
+        if(cf.type === 'select') typeBadge += ` (${cf.options.split(',').length} opcions)`;
+        
+        container.innerHTML += `
+            <div class="flex justify-between items-center bg-white border border-blue-100 p-2 rounded-md text-sm shadow-sm">
+                <div><span class="font-bold text-gray-700">${cf.label}</span> <span class="text-xs text-gray-400">(${typeBadge})</span></div>
+                <button onclick="removeCustomField('${cf.id}')" class="text-red-500 hover:bg-red-50 p-1 rounded transition">
+                    <i data-lucide="trash-2" class="w-4 h-4"></i>
+                </button>
+            </div>
+        `;
+    });
+    lucide.createIcons();
+}
+
+function addCustomField() {
+    const nameInput = document.getElementById('new-cf-name');
+    const typeInput = document.getElementById('new-cf-type');
+    const optInput  = document.getElementById('new-cf-options');
+    
+    const name = nameInput.value.trim();
+    if (!name) return;
+    
+    // Evitem que crein un camp anomenat FID per no col·lisionar amb l'autonumèric
+    if (name.toUpperCase() === 'FID') {
+        showNotification('⚠️ FID és un nom reservat pel sistema', true);
+        return;
+    }
+
+    if (customFields.some(cf => cf.label.toLowerCase() === name.toLowerCase())) {
+        showNotification('⚠️ Aquest camp ja existeix', true);
+        return;
+    }
+
+    const newField = { id: 'cf_' + Date.now(), label: name, type: typeInput.value };
+    if (typeInput.value === 'select') {
+        newField.options = optInput.value.trim() || 'Opció 1,Opció 2';
+    }
+
+    customFields.push(newField);
+    localStorage.setItem('custom_fields', JSON.stringify(customFields));
+    
+    nameInput.value = '';
+    optInput.value = '';
+    renderAdminCustomFields();
+    showNotification('✅ Camp afegit');
+}
+
+function removeCustomField(id) {
+    if (!confirm('Segur que vols eliminar aquest camp de la teva plantilla? (Els punts ja guardats mantindran les dades en els seus arxius)')) return;
+    customFields = customFields.filter(cf => cf.id !== id);
+    localStorage.setItem('custom_fields', JSON.stringify(customFields));
+    renderAdminCustomFields();
+}
+
+function renderDynamicFormFields(props = {}) {
+    const container = document.getElementById('dynamic-fields-container');
+    if (!container) return;
+    container.innerHTML = '';
+    
+    customFields.forEach(cf => {
+        // Compatibilitat amb propietats de versions anteriors
+        let val = props[cf.label] !== undefined && props[cf.label] !== null ? props[cf.label] : '';
+        if (val === '') {
+            if (cf.id === 'cf_codi') val = props.codi || '';
+            if (cf.id === 'cf_tipus') val = props.tipus || '';
+            if (cf.id === 'cf_estat') val = props.estat || '';
+            if (cf.id === 'cf_notes') val = props.notes || '';
+        }
+
+        let fieldHtml = '';
+        
+        if (cf.type === 'textarea') {
+            fieldHtml = `
+                <div class="flex justify-between items-center">
+                    <label class="font-semibold text-gray-700 text-sm">${cf.label}</label>
+                    <button type="button" id="btn-dictate-${cf.id}" onclick="toggleDictation('dyn_${cf.id}', 'btn-dictate-${cf.id}')" class="text-blue-600 bg-blue-50 p-2 rounded-full hover:bg-blue-100 transition shadow-sm border border-blue-200">
+                        <i data-lucide="mic" class="w-4 h-4"></i>
+                    </button>
+                </div>
+                <textarea id="dyn_${cf.id}" rows="3" class="border border-gray-300 rounded-lg p-3 focus:ring-2 focus:ring-blue-500 outline-none" placeholder="${cf.label}...">${val}</textarea>
+            `;
+        } else if (cf.type === 'select') {
+            let optionsHtml = `<option value="">-- Selecciona --</option>`;
+            if (cf.options) {
+                cf.options.split(',').forEach(opt => {
+                    let o = opt.trim();
+                    let selected = (val === o) ? 'selected' : '';
+                    optionsHtml += `<option value="${o}" ${selected}>${o}</option>`;
+                });
+            }
+            fieldHtml = `
+                <label class="font-semibold text-gray-700 text-sm">${cf.label}</label>
+                <select id="dyn_${cf.id}" class="border border-gray-300 rounded-lg p-3 focus:ring-2 focus:ring-blue-500 outline-none bg-white">
+                    ${optionsHtml}
+                </select>
+            `;
+        } else {
+            fieldHtml = `
+                <label class="font-semibold text-gray-700 text-sm">${cf.label}</label>
+                <input type="${cf.type}" id="dyn_${cf.id}" value="${val}" class="border border-gray-300 rounded-lg p-3 focus:ring-2 focus:ring-blue-500 outline-none" placeholder="${cf.label}...">
+            `;
+        }
+
+        container.innerHTML += `<div class="flex flex-col gap-1">${fieldHtml}</div>`;
+    });
+    
+    // Per als dispositius sense micròfon webkit
+    if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) {
+        document.querySelectorAll('[id^="btn-dictate-"]').forEach(btn => btn.classList.add('hidden'));
+    }
+}
+
+// ── COMPRESSIÓ + INJECCIÓ EXIF GPS (ZERO RAM OVERHEAD) ────────
+function compressWithExif(fileUrl, quality, maxDim) {
+    return new Promise(async (resolve, reject) => {
+        let img;
+        try {
+            img = await new Promise((res, rej) => {
+                const tempImg = new Image();
+                tempImg.onload = () => res(tempImg);
+                tempImg.onerror = () => rej(new Error('Càrrega imatge fallida.'));
+                tempImg.src = fileUrl;
+            });
+        } catch (err) {
+            return reject(err);
+        }
+
+        let { width, height } = img;
+        if (width > maxDim || height > maxDim) {
+            if (width > height) { height = Math.round(height * maxDim / width); width = maxDim; }
+            else                { width  = Math.round(width  * maxDim / height); height = maxDim; }
+        }
+
+        const canvas = document.createElement('canvas');
+        canvas.width = width; canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(img, 0, 0, width, height);
+        
+        img.src = '';
+        img = null;
+
+        const q = quality >= 1.0 ? 0.99 : quality; 
+        canvas.toBlob(async blob => {
+            ctx.clearRect(0, 0, width, height);
+            canvas.width = 1; canvas.height = 1; 
+            
+            if (!blob) { reject(new Error('toBlob fallida')); return; }
+            if (currentLat === null || currentLon === null) { resolve(blob); return; }
+
+            try {
+                let exifObj = { "0th": {}, "Exif": {}, "GPS": {} };
+
+                function toRat(v) {
+                    v = Math.abs(v);
+                    const deg = Math.floor(v);
+                    const minF = (v - deg) * 60;
+                    const min  = Math.floor(minF);
+                    const secN = Math.round((minF - min) * 60 * 10000);
+                    return [[deg, 1], [min, 1], [secN, 10000]];
+                }
+
+                exifObj.GPS[piexif.GPSIFD.GPSLatitudeRef]  = currentLat >= 0 ? 'N' : 'S';
+                exifObj.GPS[piexif.GPSIFD.GPSLatitude]      = toRat(currentLat);
+                exifObj.GPS[piexif.GPSIFD.GPSLongitudeRef] = currentLon >= 0 ? 'E' : 'W';
+                exifObj.GPS[piexif.GPSIFD.GPSLongitude]     = toRat(currentLon);
+                exifObj.GPS[piexif.GPSIFD.GPSMapDatum]      = 'WGS-84';
+
+                const exifBytesStr = piexif.dump(exifObj); 
+
+                const exifLen = exifBytesStr.length + 2;
+                const app1Marker = new Uint8Array([0xFF, 0xE1, (exifLen >> 8) & 0xFF, exifLen & 0xFF]);
+                const exifDataArray = new Uint8Array(exifBytesStr.length);
+                for (let i = 0; i < exifBytesStr.length; i++) {
+                    exifDataArray[i] = exifBytesStr.charCodeAt(i) & 0xFF;
+                }
+
+                const headerBlob = blob.slice(0, 50);
+                
+                let headerArr;
+                if (headerBlob.arrayBuffer) {
+                    const headerBuf = await headerBlob.arrayBuffer();
+                    headerArr = new Uint8Array(headerBuf);
+                } else {
+                    headerArr = await new Promise((res, rej) => {
+                        const reader = new FileReader();
+                        reader.onload = e => res(new Uint8Array(e.target.result));
+                        reader.onerror = e => rej(e);
+                        reader.readAsArrayBuffer(headerBlob);
+                    });
+                }
+
+                let offset = 2;
+                if (headerArr[0] === 0xFF && headerArr[1] === 0xD8) {
+                    if (headerArr[2] === 0xFF && headerArr[3] === 0xE0) {
+                        const app0Len = (headerArr[4] << 8) | headerArr[5];
+                        offset = 2 + 2 + app0Len;
+                    }
+                }
+
+                const finalBlob = new Blob([
+                    blob.slice(0, offset),
+                    app1Marker,
+                    exifDataArray,
+                    blob.slice(offset)
+                ], { type: 'image/jpeg' });
+
+                resolve(finalBlob); 
+            } catch (err) {
+                console.error('Error injectant EXIF en binari:', err);
+                resolve(blob); 
+            }
+        }, 'image/jpeg', q);
+    });
+}
+
+function triggerDownload(blob, filename) {
+    const a   = document.createElement('a');
+    const url = URL.createObjectURL(blob);
+    a.href     = url;
+    a.download = filename;
+    a.style.display = 'none';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(url), 5000);
+}
+
+// ── GESTIÓ DE PANELLS ─────────────────────────────────────────
+const backdrop   = document.getElementById('backdrop');
+const formPanel  = document.getElementById('form-panel');
+const toolsPanel = document.getElementById('tools-panel');
+
+function closeAllPanels() {
+    formPanel.classList.add('translate-y-full');
+    toolsPanel.classList.add('translate-y-full');
+    setTimeout(() => backdrop.classList.add('hidden'), 300);
+}
+
+// ── NUMERACIÓ DE PUNTS ────────────────────────────────────────
+function getNextPointNumber() {
+    const customStart = parseInt(localStorage.getItem('custom_start_num')) || 1;
+    const nums = savedPoints.map(f => f.properties.FID).filter(n => typeof n === 'number');
+    return Math.max(customStart, (nums.length > 0 ? Math.max(...nums) : 0) + 1);
+}
+
+function updateCustomStartNum(val) {
+    const num = parseInt(val);
+    if (!isNaN(num) && num > 0) localStorage.setItem('custom_start_num', num);
+}
+
+// ── FORMULARI NOU PUNT ────────────────────────────────────────
+function openNewPointForm() {
+    editingPointId = null;
+    document.getElementById('form-title-text').innerText = 'Nou Punt';
+    document.getElementById('btn-delete-point').classList.add('hidden');
+    document.getElementById('new-point-id').innerText    = `#${getNextPointNumber()}`;
+    document.getElementById('revisat').checked = false;
+    
+    renderDynamicFormFields({});
+
+    document.getElementById('photo-preview-container').innerHTML = '';
+    document.getElementById('photo-preview-container').classList.add('hidden');
+    document.getElementById('photo-status').innerText = 'Sense fotos noves';
+    backdrop.classList.remove('hidden');
+    setTimeout(() => formPanel.classList.remove('translate-y-full'), 10);
+}
+
+function editPoint(id) {
+    const f = savedPoints.find(feat => feat.id === id);
+    if (!f) return;
+    editingPointId = id;
+    document.getElementById('form-title-text').innerText = 'Editar Punt';
+    document.getElementById('btn-delete-point').classList.remove('hidden');
+    document.getElementById('new-point-id').innerText = `#${f.properties.FID}`;
+    document.getElementById('revisat').checked = f.properties.revisat || false;
+    
+    renderDynamicFormFields(f.properties);
+
+    document.getElementById('photo-preview-container').innerHTML = '';
+    document.getElementById('photo-preview-container').classList.add('hidden');
+    document.getElementById('edit-photo-info').innerText =
+        (f.properties.n_fotos > 0) ? `(${f.properties.n_fotos} desades)` : '';
+    map.closePopup();
+    backdrop.classList.remove('hidden');
+    setTimeout(() => formPanel.classList.remove('translate-y-full'), 10);
+    lucide.createIcons();
+}
+
+function deletePointById(id) {
+    if (!confirm('Eliminar punt?')) return;
+    const f = savedPoints.find(feat => feat.id === id);
+    if (f && f.properties.local_keys) {
+        f.properties.local_keys.forEach(k => deleteBlobFromDB(k));
+    }
+    savedPoints = savedPoints.filter(feat => feat.id !== id);
+    localStorage.setItem('inspeccions_qgis', JSON.stringify(savedPoints));
+    refreshMapMarkers();
+    closeAllPanels();
+}
+
+function deleteCurrentPoint() { if (editingPointId) deletePointById(editingPointId); }
+
+function openToolsPanel() {
+    const layerNameInput = document.getElementById('layer-name-input');
+    if(layerNameInput) layerNameInput.value = layerName;
+    document.getElementById('custom-start-num').value = getNextPointNumber();
+    
+    renderAdminCustomFields();
+
+    backdrop.classList.remove('hidden');
+    setTimeout(() => toolsPanel.classList.remove('translate-y-full'), 10);
+}
+
+function updateLayerName(val) {
+    const v = val.trim().replace(/[^a-z0-9_\-]/gi, '_') || 'inspeccio';
+    layerName = v;
+    localStorage.setItem('layer_name', v);
+}
+
+// ── GESTIÓ DE MEMÒRIA CAU ───────────────────────
+function cleanCache() {
+    if (!db) { showNotification('⚠️ Base de dades no llesta', true); return; }
+    try {
+        const tx = db.transaction([STORE_NAME], 'readwrite');
+        const store = tx.objectStore(STORE_NAME);
+        const req = store.getAllKeys();
+        req.onsuccess = () => {
+            const allDbKeys = req.result;
+            let validKeys = [];
+            savedPoints.forEach(p => {
+                if (p.properties.local_keys) validKeys.push(...p.properties.local_keys);
+            });
+            let deleted = 0;
+            allDbKeys.forEach(k => {
+                if (!validKeys.includes(k)) {
+                    store.delete(k);
+                    deleted++;
+                }
+            });
+            showNotification(`✅ Memòria cau netejada (${deleted} arxius brossa eliminats)`);
+        };
+        req.onerror = () => showNotification('❌ Error llegint memòria', true);
+    } catch (e) {
+        console.error(e);
+        showNotification('❌ Error netejant memòria', true);
+    }
+}
+
+// ── CAPTURA DE FOTO ───────────────────────────────────────────
+async function handlePhoto(event) {
+    const inputEl = event.target;
+    const files = Array.from(inputEl.files || []);
+    if (!files.length) return;
+
+    const statusEl = document.getElementById('photo-status');
+    const pc       = document.getElementById('photo-preview-container');
+    pc.classList.remove('hidden');
+
+    statusEl.innerText = `⏳ Preparant fitxers...`;
+
+    const fileUrls = files.map(f => URL.createObjectURL(f));
+
+    const quality  = parseFloat(document.getElementById('quality-select').value) || 0.7;
+    const maxDim   = quality >= 1.0 ? 2048 : 1024; 
+
+    const numPunt = editingPointId
+        ? savedPoints.find(f => f.id === editingPointId)?.properties.FID ?? getNextPointNumber()
+        : getNextPointNumber();
+
+    const sessionPrefix = `tmp_${numPunt}_${Date.now()}`;
+
+    for (let i = 0; i < fileUrls.length; i++) {
+        statusEl.innerText = `⏳ Processant foto ${i + 1}/${fileUrls.length}...`;
+        await new Promise(r => setTimeout(r, 50)); 
+
+        let blob;
+        try {
+            blob = await compressWithExif(fileUrls[i], quality, maxDim);
+        } catch (err) {
+            console.error('Error compressió:', err);
+            showNotification(`❌ Error processant foto ${i + 1}`, true);
+            URL.revokeObjectURL(fileUrls[i]);
+            continue;
+        }
+
+        URL.revokeObjectURL(fileUrls[i]);
+        const dbKey = `${sessionPrefix}_${i}`;
+
+        try {
+            await saveBlobToDB(dbKey, blob);
+        } catch (err) {
+            console.error('Error IndexedDB:', err);
+            showNotification(`❌ Error desant foto ${i + 1}`, true);
+            continue;
+        }
+
+        const filename = `${layerName}/${layerName}_punt_${numPunt}_foto_${i + 1}.jpg`;
+
+        try {
+            triggerDownload(blob, filename);
+        } catch (err) {
+            console.warn('Descàrrega fallida (no crític):', err);
+        }
+
+        try {
+            const previewBlob = await getBlobFromDB(dbKey);
+            if (previewBlob) {
+                const previewUrl = URL.createObjectURL(previewBlob);
+                const imgNode = document.createElement('img');
+                imgNode.className = 'rounded-lg max-h-24 object-cover w-full border';
+                imgNode.dataset.dbkey = dbKey;
+                imgNode.onload = () => URL.revokeObjectURL(previewUrl);
+                imgNode.onerror = () => URL.revokeObjectURL(previewUrl);
+                imgNode.src = previewUrl;
+                pc.appendChild(imgNode);
+            }
+        } catch (err) {
+            console.warn('Previsualització fallida:', err);
+        }
+
+        if (!window._pendingPhotoKeys) window._pendingPhotoKeys = [];
+        window._pendingPhotoKeys.push(dbKey);
+    }
+
+    const total = (window._pendingPhotoKeys || []).length;
+    statusEl.innerText = `${total} foto(es) ✓ (desades a Downloads)`;
+    
+    inputEl.value = '';
+}
+
+// ── GUARDAR PUNT ──────────────────────────────────────────────
+async function savePoint() {
+    if (currentLat === null) { showNotification('⚠️ GPS no disponible', true); return; }
+
+    const isEdit  = editingPointId !== null;
+    const revisat = document.getElementById('revisat').checked;
+
+    let f = isEdit
+        ? savedPoints.find(feat => feat.id === editingPointId)
+        : {
+            type: 'Feature',
+            id: Date.now().toString(),
+            geometry: { type: 'Point', coordinates: [currentLon, currentLat] },
+            properties: { FID: getNextPointNumber(), n_fotos: 0, local_keys: [] }
+          };
+
+    if (!f.properties.local_keys) f.properties.local_keys = [];
+
+    f.geometry.coordinates   = [currentLon, currentLat];
+    f.properties.revisat     = revisat;
+    f.properties.data_hora   = new Date().toISOString();
+
+    // Guardar valors dels camps dinàmics
+    customFields.forEach(cf => {
+        const input = document.getElementById(`dyn_${cf.id}`);
+        if (input) {
+            const val = input.value.trim();
+            f.properties[cf.label] = cf.type === 'number' ? (val === '' ? null : Number(val)) : val;
+        }
+    });
+
+    const pendingKeys = window._pendingPhotoKeys || [];
+    pendingKeys.forEach(k => f.properties.local_keys.push(k));
+    window._pendingPhotoKeys = [];
+
+    f.properties.n_fotos = f.properties.local_keys.length;
+
+    if (!isEdit) savedPoints.push(f);
+    localStorage.setItem('inspeccions_qgis', JSON.stringify(savedPoints));
+    refreshMapMarkers();
+    closeAllPanels();
+    showNotification(`✅ Punt #${f.properties.FID} desat!`);
+}
+
+// ── MAPA ──────────────────────────────────────────────────────
+function initMap() {
+    map = L.map('map', { zoomControl: false }).setView([41.7286, 1.8201], 14);
+    L.control.zoom({ position: 'topright' }).addTo(map);
+    L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}', { maxZoom: 19 }).addTo(map);
+    map.on('click', e => updatePosition(e.latlng.lat, e.latlng.lng));
+    loadSavedPoints();
+    locateUser();
+}
+
+function updatePosition(lat, lon) {
+    currentLat = lat; currentLon = lon;
+    const utm = wgs84ToUtm31(lon, lat);
+    document.getElementById('lat-display').innerText = utm.x.toFixed(2) + ' m';
+    document.getElementById('lon-display').innerText = utm.y.toFixed(2) + ' m';
+    if (userMarker) userMarker.setLatLng([lat, lon]);
+    else userMarker = L.marker([lat, lon], {
+        icon: L.divIcon({
+            className: '',
+            html: "<div style='background:#3b82f6;width:14px;height:14px;border-radius:50%;border:2px solid white;'></div>",
+            iconSize: [14, 14], iconAnchor: [7, 7]
+        })
+    }).addTo(map);
+}
+
+function locateUser() {
+    if (!navigator.geolocation) return;
+    navigator.geolocation.getCurrentPosition(
+        p => { updatePosition(p.coords.latitude, p.coords.longitude); map.flyTo([p.coords.latitude, p.coords.longitude], 17); },
+        null,
+        { enableHighAccuracy: true }
+    );
+}
+
+// ── MARCADORS AL MAPA ─────────────────────────────────────────
+function refreshMapMarkers() {
+    map.eachLayer(l => { if (l instanceof L.Marker && l !== userMarker) map.removeLayer(l); });
+
+    savedPoints.forEach(f => {
+        const props = f.properties;
+        
+        // Colors segons compatibilitat antiga o revisió
+        let estat = props['Estat'] || props.estat || '';
+        let color = props.revisat
+            ? '#3b82f6'
+            : ({ 'Bo': '#22c55e', 'Regular': '#f59e0b', 'Dolent': '#ef4444' }[estat] || '#9ca3af');
+
+        const icon = L.divIcon({
+            className: '',
+            html: `<div style="background:${color};width:18px;height:18px;border-radius:50% 50% 50% 0;transform:rotate(-45deg);border:2px solid white;box-shadow:0 2px 5px rgba(0,0,0,.3);"></div>`,
+            iconSize: [18, 18], iconAnchor: [9, 18]
+        });
+
+        const m = L.marker([f.geometry.coordinates[1], f.geometry.coordinates[0]], { icon }).addTo(map);
+
+        const keys = props.local_keys || [];
+        let imgHtml = '';
+        if (keys.length > 0) {
+            imgHtml = `<div class="popup-fotos-label">${keys.length} foto(es):</div>`;
+            keys.forEach((k, idx) => {
+                imgHtml += `<img id="pimg_${k.replace(/[^a-z0-9]/gi,'')}"
+                    style="width:100%;border-radius:4px;margin-top:4px;cursor:pointer;min-height:40px;background:#f3f4f6;"
+                    alt="Carregant..."
+                    onclick="openPhotoViewerFromKey('${k}')">`;
+            });
+        }
+
+        let h = `<div class="popup-content">
+            <div class="popup-id">#${props.FID}${props.revisat ? ' (REVISAT)' : ''}</div>`;
+        
+        // Mostrar camps personalitzats de forma dinàmica
+        customFields.forEach(cf => {
+            let val = props[cf.label] !== undefined ? props[cf.label] : '';
+            // Compatibilitat heretada
+            if (val === '') {
+                if (cf.id === 'cf_codi') val = props.codi || '';
+                if (cf.id === 'cf_tipus') val = props.tipus || '';
+                if (cf.id === 'cf_estat') val = props.estat || '';
+                if (cf.id === 'cf_notes') val = props.notes || '';
+            }
+            if (val !== null && val !== '') {
+                h += `<div class="popup-row"><b>${cf.label}:</b> ${val}</div>`;
+            }
+        });
+
+        h += imgHtml;
+        h += `<div style="text-align:right;margin-top:10px;display:flex;justify-content:flex-end;gap:8px;">
+            <button onclick="deletePointById('${f.id}')" style="background:#ef4444;color:white;padding:5px;border-radius:5px;">
+                <i data-lucide="trash-2" style="width:14px;"></i>
+            </button>
+            <button onclick="editPoint('${f.id}')" style="background:#3b82f6;color:white;padding:5px 10px;border-radius:5px;font-weight:bold;">✏️ Edita</button>
+        </div></div>`;
+
+        m.bindPopup(h, { maxWidth: 300 }).on('popupopen', async () => {
+            lucide.createIcons();
+            for (const k of keys) {
+                const imgEl = document.getElementById(`pimg_${k.replace(/[^a-z0-9]/gi,'')}`);
+                if (!imgEl) continue;
+                try {
+                    const blob = await getBlobFromDB(k);
+                    if (blob) {
+                        const url = URL.createObjectURL(blob);
+                        imgEl.onload  = () => {}; 
+                        imgEl.onerror = () => { imgEl.alt = '⚠️ Error'; };
+                        imgEl.src = url;
+                        m.once('popupclose', () => URL.revokeObjectURL(url));
+                    } else {
+                        imgEl.alt = '⚠️ Foto no trobada';
+                    }
+                } catch {
+                    imgEl.alt = '⚠️ Error';
+                }
+            }
+        });
+    });
+
+    document.getElementById('points-count').innerText = savedPoints.length;
+}
+
+function loadSavedPoints() {
+    const s = localStorage.getItem('inspeccions_qgis');
+    if (s) { 
+        savedPoints = JSON.parse(s); 
+        // Migració de num_punt a FID per a punts antics
+        let changed = false;
+        savedPoints.forEach(f => {
+            if (f.properties.num_punt !== undefined) {
+                f.properties.FID = f.properties.num_punt;
+                delete f.properties.num_punt;
+                changed = true;
+            }
+        });
+        if (changed) localStorage.setItem('inspeccions_qgis', JSON.stringify(savedPoints));
+        refreshMapMarkers(); 
+    }
+}
+
+// ── VISOR DE FOTOS ────────────────────────────────────────────
+let viewerScale = 1, viewerMinScale = 1, viewerMaxScale = 5;
+let viewerOffsetX = 0, viewerOffsetY = 0;
+let viewerDragging = false, viewerLastX = 0, viewerLastY = 0;
+let viewerLastDist = null;
+let _viewerCurrentUrl = null;
+
+function applyViewerTransform() {
+    document.getElementById('photo-viewer-img').style.transform =
+        `translate(${viewerOffsetX}px, ${viewerOffsetY}px) scale(${viewerScale})`;
+}
+
+function clampViewerOffset() {
+    const img  = document.getElementById('photo-viewer-img');
+    const maxX = (img.naturalWidth  * viewerScale - window.innerWidth)  / 2;
+    const maxY = (img.naturalHeight * viewerScale - window.innerHeight) / 2;
+    viewerOffsetX = Math.max(-Math.max(maxX, 0), Math.min(Math.max(maxX, 0), viewerOffsetX));
+    viewerOffsetY = Math.max(-Math.max(maxY, 0), Math.min(Math.max(maxY, 0), viewerOffsetY));
+}
+
+function resetViewerZoom() {
+    viewerScale = 1; viewerOffsetX = 0; viewerOffsetY = 0;
+    const img = document.getElementById('photo-viewer-img');
+    img.style.transition = 'transform 0.2s ease';
+    applyViewerTransform();
+    setTimeout(() => img.style.transition = 'none', 200);
+}
+
+function openPhotoViewer(url) {
+    if (_viewerCurrentUrl && _viewerCurrentUrl !== url) {
+        URL.revokeObjectURL(_viewerCurrentUrl);
+    }
+    _viewerCurrentUrl = url;
+
+    const modal = document.getElementById('photo-viewer-modal');
+    const img   = document.getElementById('photo-viewer-img');
+    viewerScale = 1; viewerOffsetX = 0; viewerOffsetY = 0;
+    img.style.transition = 'none';
+    applyViewerTransform();
+    img.src    = url;
+    img.onerror = () => { img.alt = '⚠️ No s\'ha pogut carregar'; };
+
+    let dlBtn = document.getElementById('photo-viewer-download');
+    if (!dlBtn) {
+        dlBtn = document.createElement('a');
+        dlBtn.id = 'photo-viewer-download';
+        dlBtn.target = '_blank';
+        dlBtn.innerHTML = '⬇';
+        dlBtn.title = 'Descarregar foto';
+        dlBtn.style.cssText = 'position:absolute;bottom:24px;right:16px;z-index:10;background:rgba(0,0,0,0.5);color:white;border-radius:50%;width:36px;height:36px;display:flex;align-items:center;justify-content:center;text-decoration:none;font-size:16px;';
+        modal.appendChild(dlBtn);
+    }
+    dlBtn.href = url;
+    modal.classList.replace('hidden', 'flex');
+    lucide.createIcons();
+}
+
+async function openPhotoViewerFromKey(key) {
+    try {
+        const blob = await getBlobFromDB(key);
+        if (!blob) { showNotification('Foto no trobada localment', true); return; }
+        const url = URL.createObjectURL(blob);
+        openPhotoViewer(url);
+    } catch (err) {
+        showNotification('Error obrint foto', true);
+    }
+}
+
+function closePhotoViewer() {
+    document.getElementById('photo-viewer-modal').classList.replace('flex', 'hidden');
+    document.getElementById('photo-viewer-img').src = '';
+    if (_viewerCurrentUrl) { 
+        URL.revokeObjectURL(_viewerCurrentUrl); 
+        _viewerCurrentUrl = null; 
+    }
+}
+
+(function () {
+    const container = document.getElementById('photo-viewer-container');
+    if (!container) return;
+
+    container.addEventListener('wheel', e => {
+        if (!document.getElementById('photo-viewer-modal').classList.contains('flex')) return;
+        e.preventDefault();
+        const delta = e.deltaY > 0 ? 0.85 : 1.15;
+        viewerScale = Math.min(viewerMaxScale, Math.max(viewerMinScale, viewerScale * delta));
+        clampViewerOffset(); applyViewerTransform();
+    }, { passive: false });
+
+    container.addEventListener('dblclick', e => {
+        if (e.target.id === 'photo-viewer-img') resetViewerZoom();
+    });
+
+    container.addEventListener('mousedown', e => {
+        if (viewerScale <= 1) return;
+        viewerDragging = true; viewerLastX = e.clientX; viewerLastY = e.clientY;
+        container.style.cursor = 'grabbing';
+    });
+    window.addEventListener('mousemove', e => {
+        if (!viewerDragging) return;
+        viewerOffsetX += e.clientX - viewerLastX; viewerOffsetY += e.clientY - viewerLastY;
+        viewerLastX = e.clientX; viewerLastY = e.clientY;
+        clampViewerOffset(); applyViewerTransform();
+    });
+    window.addEventListener('mouseup', () => {
+        viewerDragging = false;
+        container.style.cursor = viewerScale > 1 ? 'grab' : 'default';
+    });
+
+    container.addEventListener('click', e => { if (e.target === container) closePhotoViewer(); });
+
+    container.addEventListener('touchstart', e => {
+        if (e.touches.length === 2) {
+            viewerLastDist = Math.hypot(e.touches[0].clientX - e.touches[1].clientX, e.touches[0].clientY - e.touches[1].clientY);
+        } else if (e.touches.length === 1 && viewerScale > 1) {
+            viewerDragging = true; viewerLastX = e.touches[0].clientX; viewerLastY = e.touches[0].clientY;
+        }
+    }, { passive: true });
+
+    container.addEventListener('touchmove', e => {
+        if (e.touches.length === 2 && viewerLastDist !== null) {
+            e.preventDefault();
+            const dist = Math.hypot(e.touches[0].clientX - e.touches[1].clientX, e.touches[0].clientY - e.touches[1].clientY);
+            viewerScale = Math.min(viewerMaxScale, Math.max(viewerMinScale, viewerScale * dist / viewerLastDist));
+            viewerLastDist = dist;
+            clampViewerOffset(); applyViewerTransform();
+        } else if (e.touches.length === 1 && viewerDragging) {
+            viewerOffsetX += e.touches[0].clientX - viewerLastX; viewerOffsetY += e.touches[0].clientY - viewerLastY;
+            viewerLastX = e.touches[0].clientX; viewerLastY = e.touches[0].clientY;
+            clampViewerOffset(); applyViewerTransform();
+        }
+    }, { passive: false });
+
+    container.addEventListener('touchend', e => {
+        if (e.touches.length < 2) viewerLastDist = null;
+        if (e.touches.length === 0) viewerDragging = false;
+    });
+})();
+
+// ── DICTAT PER VEU ────────────────────────────────────────────
+let recognition = null, isRecording = false;
+let currentDictationTarget = null;
+let currentDictationButton = null;
+
+if ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window) {
+    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+    recognition = new SR();
+    recognition.lang = 'ca-ES'; recognition.continuous = false; recognition.interimResults = true;
+
+    recognition.onstart = () => {
+        isRecording = true;
+        if(currentDictationButton) document.getElementById(currentDictationButton).classList.add('mic-recording');
+        showNotification('🎙️ Escoltant... Parla ara');
+    };
+    recognition.onresult = event => {
+        let final = '';
+        for (let i = event.resultIndex; i < event.results.length; i++)
+            if (event.results[i].isFinal) final += event.results[i][0].transcript;
+        if (final && currentDictationTarget) {
+            const el = document.getElementById(currentDictationTarget);
+            if(el) el.value += (el.value.length > 0 && !el.value.endsWith(' ') ? ' ' : '') + final;
+        }
+    };
+    recognition.onerror = event => {
+        if (event.error === 'not-allowed') showNotification('❌ Permís de micròfon denegat', true);
+        stopDictation();
+    };
+    recognition.onend = () => stopDictation();
+}
+
+function toggleDictation(targetId, buttonId) {
+    if (!recognition) { showNotification('El teu navegador no suporta el dictat', true); return; }
+    if (isRecording) {
+        recognition.stop();
+    } else { 
+        currentDictationTarget = targetId;
+        currentDictationButton = buttonId;
+        try { recognition.start(); } catch (e) { console.error(e); } 
+    }
+}
+
+function stopDictation() {
+    isRecording = false;
+    if(currentDictationButton) {
+        const btn = document.getElementById(currentDictationButton);
+        if(btn) btn.classList.remove('mic-recording');
+    }
+}
+
+// ── EXPORTAR ──────────────────────────────────────────────────
+function buildGeoJSONExport(features) {
+    return {
+        type: 'FeatureCollection',
+        crs: { type: 'name', properties: { name: 'EPSG:25831' } },
+        features
+    };
+}
+
+function exportGeoJSONonly() {
+    if (!savedPoints.length) return;
+    const feats = JSON.parse(JSON.stringify(savedPoints));
+    feats.forEach((f, i) => {
+        f.id = parseInt(f.properties.FID) || (i + 1);
+        const utm = wgs84ToUtm31(f.geometry.coordinates[0], f.geometry.coordinates[1]);
+        f.geometry.coordinates = [utm.x, utm.y];
+
+        const keys = f.properties.local_keys || [];
+        delete f.properties.local_keys;
+        keys.forEach((k, idx) => {
+            f.properties[`foto_url_${idx + 1}`] = `${layerName}/${layerName}_punt_${f.properties.FID}_foto_${idx + 1}.jpg`;
+        });
+    });
+    const b = new Blob([JSON.stringify(buildGeoJSONExport(feats), null, 2)], { type: 'application/geo+json' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(b);
+    a.download = `${layerName}_${Date.now()}.geojson`;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+}
+
+async function exportDataAsZip() {
+    if (!savedPoints.length) return;
+    showNotification('⏳ Empaquetant...');
+
+    const zip = new JSZip();
+    const folder = zip.folder(layerName);
+    const feats  = JSON.parse(JSON.stringify(savedPoints));
+
+    for (let i = 0; i < feats.length; i++) {
+        const f = feats[i];
+        f.id = parseInt(f.properties.FID) || (i + 1);
+        const utm = wgs84ToUtm31(f.geometry.coordinates[0], f.geometry.coordinates[1]);
+        f.geometry.coordinates = [utm.x, utm.y];
+
+        const keys = f.properties.local_keys || [];
+        delete f.properties.local_keys;
+
+        for (let j = 0; j < keys.length; j++) {
+            const nom = `${layerName}_punt_${f.properties.FID}_foto_${j + 1}.jpg`;
+            try {
+                const blob = await getBlobFromDB(keys[j]);
+                if (blob) {
+                    folder.file(nom, blob);
+                    f.properties[`foto_url_${j + 1}`] = `${layerName}/${nom}`;
+                }
+            } catch (err) {
+                console.warn('Error llegint foto del ZIP:', err);
+            }
+        }
+    }
+
+    zip.file(`${layerName}.geojson`, JSON.stringify(buildGeoJSONExport(feats), null, 2));
+
+    try {
+        const content = await zip.generateAsync({ type: 'blob' });
+        const a = document.createElement('a');
+        a.href     = URL.createObjectURL(content);
+        a.download = `${layerName}_${Date.now()}.zip`;
+        a.click();
+        setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+        showNotification('✅ ZIP descarregat!');
+    } catch (err) {
+        showNotification('❌ Error generant ZIP', true);
+        console.error(err);
+    }
+}
+
+// ── IMPORTAR ZIP / GEOJSON ──────────────────────────────────────────
+async function importData(event) {
+    const file = event.target.files[0];
+    if (!file) return;
+
+    if (file.name.toLowerCase().endsWith('.zip')) {
+        showNotification('⏳ Descomprimint ZIP i restaurant fotos...');
+        try {
+            const zip = await JSZip.loadAsync(file);
+            
+            let geojsonFile = null;
+            zip.forEach((relativePath, zipEntry) => {
+                if (relativePath.toLowerCase().endsWith('.geojson')) geojsonFile = zipEntry;
+            });
+
+            if (!geojsonFile) throw new Error('Cap arxiu GeoJSON trobat al ZIP');
+
+            const geojsonText = await geojsonFile.async("string");
+            const data = JSON.parse(geojsonText);
+            if (data.type !== 'FeatureCollection' || !data.features) throw new Error('Format GeoJSON invàlid');
+
+            let importedCount = 0;
+            let fotosCount = 0;
+
+            for (let f of data.features) {
+                // Migració per a arxius antics exportats prèviament
+                if (f.properties && f.properties.num_punt !== undefined) {
+                    f.properties.FID = f.properties.num_punt;
+                    delete f.properties.num_punt;
+                }
+
+                const [x, y] = f.geometry.coordinates;
+                const wgs84 = utm31ToWgs84(x, y);
+                f.geometry.coordinates = [wgs84.lon, wgs84.lat];
+                
+                f.id = Date.now().toString() + Math.floor(Math.random() * 10000);
+                if (!f.properties.local_keys) f.properties.local_keys = [];
+
+                const propKeys = Object.keys(f.properties);
+                for (let pk of propKeys) {
+                    if (pk.startsWith('foto_url_')) {
+                        const photoPath = f.properties[pk];
+                        const pathParts = photoPath.split('/');
+                        const fileName = pathParts[pathParts.length - 1];
+
+                        let zipPhoto = null;
+                        zip.forEach((relPath, entry) => {
+                            if (relPath.endsWith(fileName)) zipPhoto = entry;
+                        });
+
+                        if (zipPhoto) {
+                            const photoBlob = await zipPhoto.async("blob");
+                            const dbKey = `import_${f.id}_${pk}`;
+                            await saveBlobToDB(dbKey, photoBlob);
+                            f.properties.local_keys.push(dbKey);
+                            fotosCount++;
+                        }
+                    }
+                }
+
+                f.properties.n_fotos = f.properties.local_keys.length;
+                savedPoints.push(f);
+                importedCount++;
+            }
+
+            localStorage.setItem('inspeccions_qgis', JSON.stringify(savedPoints));
+            refreshMapMarkers();
+            closeAllPanels();
+            showNotification(`✅ ${importedCount} punts i ${fotosCount} fotos importats!`);
+        } catch(err) {
+            console.error(err);
+            showNotification('❌ Error important el ZIP', true);
+        }
+    } 
+    else {
+        const reader = new FileReader();
+        reader.onload = e => {
+            try {
+                const data = JSON.parse(e.target.result);
+                if (data.type !== 'FeatureCollection' || !data.features) throw new Error('Format no vàlid');
+                const imported = data.features.map(f => {
+                    // Migració per a arxius antics exportats prèviament
+                    if (f.properties && f.properties.num_punt !== undefined) {
+                        f.properties.FID = f.properties.num_punt;
+                        delete f.properties.num_punt;
+                    }
+                    const [x, y] = f.geometry.coordinates;
+                    const wgs84 = utm31ToWgs84(x, y);
+                    f.geometry.coordinates = [wgs84.lon, wgs84.lat];
+                    if (!f.properties.local_keys) f.properties.local_keys = [];
+                    f.id = Date.now().toString() + Math.floor(Math.random() * 1000);
+                    return f;
+                });
+                savedPoints = savedPoints.concat(imported);
+                localStorage.setItem('inspeccions_qgis', JSON.stringify(savedPoints));
+                refreshMapMarkers();
+                closeAllPanels();
+                showNotification(`✅ ${imported.length} punts importats (sense fotos)!`);
+            } catch (err) {
+                showNotification('❌ Error al llegir el GeoJSON', true);
+                console.error(err);
+            }
+        };
+        reader.readAsText(file);
+    }
+    
+    event.target.value = '';
+}
+
+// ── ESBORRAR DADES ────────────────────────────────────────────
+function clearData() {
+    if (!confirm('Segur? S\'esborraran tots els punts i fotos locals.')) return;
+    localStorage.removeItem('inspeccions_qgis');
+    location.reload();
+}
+
+// ── INICIALITZACIÓ ────────────────────────────────────────────
+window.onload = async () => {
+    await initDB();
+    initMap();
+};
+</script>
+
+</body>
+</html>
