@@ -1,11 +1,16 @@
 <!DOCTYPE html>
 <html lang="ca">
 <head>
-    <script src="https://cdn.jsdelivr.net/npm/piexifjs@1.0.6/piexif.js"></script> 
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Inspecció de Camp</title>
+    
+    <script src="https://cdn.jsdelivr.net/npm/piexifjs@1.0.6/piexif.js"></script> 
 
+    <!-- Manifest PWA Estàtic per forçar el mode pantalla completa (sense barra) -->
+    <link rel="manifest" href="data:application/manifest+json;base64,eyJuYW1lIjoiSW5zcGVjY2nDsyBkZSBDYW1wIiwic2hvcnRfbmFtZSI6Ikluc3BlY2Npw7MiLCJzdGFydF91cmwiOiIuIiwiZGlzcGxheSI6InN0YW5kYWxvbmUiLCJiYWNrZ3JvdW5kX2NvbG9yIjoiI2YzZjRmNiIsInRoZW1lX2NvbG9yIjoiIzI1NjNlYiIsImljb25zIjpbeyJzcmMiOiJodHRwczovL3VwbG9hZC53aWtpbWVkaWEub3JnL3dpa2lwZWRpYS9jb21tb25zL3RodW1iL2UvZWQvTWFwX3Bpbl9pY29uLnN2Zy8xOTJweC1NYXBfcGluX2ljb24uc3ZnLnBuZyIsInNpemVzIjoiMTkyeDE5MiIsInR5cGUiOiJpbWFnZS9wbmcifSx7InNyYyI6Imh0dHBzOi8vdXBlob2FkLndpa2ltZWRpYS5vcmcvd2lraXBlZGlhL2NvbW1vbnMvdGh1bWIvZS9lZC9NYXBfcGluX2ljb24uc3ZnLzUxMnB4LU1hcF9waW5faWNvbi5zdmcucG5nIiwic2l6ZXMiOiI1MTJ4NTEyIiwidHlwZSI6ImltYWdlL3BuZyJ9XX0=">
+
+    <!-- Meta tags per forçar mode App en iOS i Android -->
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -14,29 +19,7 @@
     <link rel="apple-touch-icon" href="https://upload.wikimedia.org/wikipedia/commons/thumb/e/ed/Map_pin_icon.svg/512px-Map_pin_icon.svg.png">
     <link rel="icon" type="image/png" sizes="512x512" href="https://upload.wikimedia.org/wikipedia/commons/thumb/e/ed/Map_pin_icon.svg/512px-Map_pin_icon.svg.png">
 
-    <!-- Manifest dinàmic per a PWA Standalone (Pantalla Completa) -->
-    <script>
-        // Generem el manifest dinàmicament usant l'URL real de Netlify
-        const manifestData = {
-            name: "Inspecció de Camp",
-            short_name: "Inspecció",
-            start_url: window.location.href.split('?')[0], // Força l'inici exacte en aquesta URL
-            display: "standalone", // Aquest és el paràmetre màgic que amaga la barra del navegador
-            background_color: "#f3f4f6",
-            theme_color: "#2563eb",
-            icons: [
-                { src: "https://upload.wikimedia.org/wikipedia/commons/thumb/e/ed/Map_pin_icon.svg/192px-Map_pin_icon.svg.png", sizes: "192x192", type: "image/png" },
-                { src: "https://upload.wikimedia.org/wikipedia/commons/thumb/e/ed/Map_pin_icon.svg/512px-Map_pin_icon.svg.png", sizes: "512x512", type: "image/png" }
-            ]
-        };
-        const manifestBlob = new Blob([JSON.stringify(manifestData)], { type: 'application/manifest+json' });
-        const manifestUrl = URL.createObjectURL(manifestBlob);
-        const link = document.createElement('link');
-        link.rel = 'manifest';
-        link.href = manifestUrl;
-        document.head.appendChild(link);
-    </script>
-
+    <!-- Llibreries externes -->
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin=""/>
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
@@ -122,7 +105,6 @@
     </div>
     <div class="p-5 overflow-y-auto flex flex-col gap-4">
         
-        <!-- Punts Fixes Essentials (Revisat i Coordenades) -->
         <div class="flex items-center gap-3 bg-gray-50 p-3 rounded-xl border border-gray-200">
             <input type="checkbox" id="revisat" class="w-6 h-6 text-blue-600 border-gray-300 rounded focus:ring-blue-500 cursor-pointer">
             <label for="revisat" class="font-bold text-gray-700 cursor-pointer">Marcar com a REVISAT</label>
@@ -138,10 +120,8 @@
             <button onclick="locateUser()" class="text-blue-500 p-1"><i data-lucide="locate" class="w-4 h-4"></i></button>
         </div>
 
-        <!-- CONTENIDOR DINÀMIC (Tots els camps s'autogeneren aquí) -->
         <div id="dynamic-fields-container" class="flex flex-col gap-4"></div>
         
-        <!-- Fotografies -->
         <div class="flex flex-col gap-1">
             <label class="font-semibold text-gray-700 text-sm">
                 Fotografies
@@ -204,7 +184,6 @@
             <input type="number" id="custom-start-num" min="1" onchange="updateCustomStartNum(this.value)" class="w-16 border border-gray-300 rounded-md p-1.5 text-center font-bold text-blue-600 outline-none">
         </div>
 
-        <!-- SECCIÓ GESTIÓ CAMPS PERSONALITZATS -->
         <div class="h-px bg-gray-100 my-2"></div>
         <div class="bg-blue-50 border border-blue-200 rounded-lg p-3 shadow-sm">
             <h3 class="font-bold text-blue-800 text-sm mb-2 flex items-center gap-1">
@@ -330,19 +309,17 @@ let editingPointId = null;
 let layerName = localStorage.getItem('layer_name') || 'inspeccio';
 let customFields = JSON.parse(localStorage.getItem('custom_fields'));
 
-// Migració per evitar col·lisió de nom amb el nou FID automàtic
 if (customFields && customFields.length > 0) {
     let changed = false;
     customFields.forEach(cf => {
         if (cf.label === 'FID') {
-            cf.label = 'Codi Extra'; // Reanomenem l'antic camp manual
+            cf.label = 'Codi Extra'; 
             changed = true;
         }
     });
     if (changed) localStorage.setItem('custom_fields', JSON.stringify(customFields));
 }
 
-// Si no hi ha camps configurats, inicialitzem els camps per defecte
 if (!customFields || customFields.length === 0) {
     customFields = [
         { id: 'cf_codi', label: 'Codi Extra', type: 'number' },
@@ -415,7 +392,6 @@ function addCustomField() {
     const name = nameInput.value.trim();
     if (!name) return;
     
-    // Evitem que crein un camp anomenat FID per no col·lisionar amb l'autonumèric
     if (name.toUpperCase() === 'FID') {
         showNotification('⚠️ FID és un nom reservat pel sistema', true);
         return;
@@ -453,7 +429,6 @@ function renderDynamicFormFields(props = {}) {
     container.innerHTML = '';
     
     customFields.forEach(cf => {
-        // Compatibilitat amb propietats de versions anteriors
         let val = props[cf.label] !== undefined && props[cf.label] !== null ? props[cf.label] : '';
         if (val === '') {
             if (cf.id === 'cf_codi') val = props.codi || '';
@@ -499,7 +474,6 @@ function renderDynamicFormFields(props = {}) {
         container.innerHTML += `<div class="flex flex-col gap-1">${fieldHtml}</div>`;
     });
     
-    // Per als dispositius sense micròfon webkit
     if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) {
         document.querySelectorAll('[id^="btn-dictate-"]').forEach(btn => btn.classList.add('hidden'));
     }
