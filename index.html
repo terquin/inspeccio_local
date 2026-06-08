@@ -19,12 +19,23 @@
 
     <!-- Registre del Service Worker físic -->
     <script>
-        // Només registra el SW si estem en un servidor web real (http/https) per evitar errors locals o de previsualització
-        if ('serviceWorker' in navigator && window.location.protocol.startsWith('http')) {
+        // Només registra el SW si estem en un servidor web real i no en previsualització (blob:)
+        if ('serviceWorker' in navigator) {
             window.addEventListener('load', () => {
-                navigator.serviceWorker.register('sw.js')
-                    .then(reg => console.log('Service Worker registrat amb èxit'))
-                    .catch(err => console.error('Error al registrar Service Worker', err));
+                try {
+                    const isHttp = window.location.protocol === 'http:' || window.location.protocol === 'https:';
+                    const isNotBlob = !window.location.href.startsWith('blob:');
+                    
+                    if (isHttp && isNotBlob) {
+                        navigator.serviceWorker.register('sw.js')
+                            .then(reg => console.log('Service Worker registrat amb èxit'))
+                            .catch(err => console.warn('Avís al registrar Service Worker:', err));
+                    } else {
+                        console.log('Registre de Service Worker omès en entorn local/previsualització.');
+                    }
+                } catch (err) {
+                    console.warn('Registre del Service Worker omès per restriccions de seguretat del navegador.', err);
+                }
             });
         }
     </script>
