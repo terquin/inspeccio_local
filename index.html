@@ -335,6 +335,10 @@ let savedPoints   = [];
 let editingPointId = null;
 
 let layerName = localStorage.getItem('layer_name') || 'inspeccio';
+const _sessionDate = (() => {
+    const d = new Date();
+    return `${d.getFullYear()}${String(d.getMonth()+1).padStart(2,'0')}${String(d.getDate()).padStart(2,'0')}`;
+})();
 let customFields = JSON.parse(localStorage.getItem('custom_fields'));
 
 if (customFields && customFields.length > 0) {
@@ -806,8 +810,7 @@ async function handlePhoto(event) {
         try {
             const dlUrl = URL.createObjectURL(blob);
             const a = document.createElement('a');
-            a.href = dlUrl; a.download = `${layerName}/${layerName}_punt_${numPunt}_foto_${i + 1}.jpg`;
-            a.style.display = 'none';
+            a.href = dlUrl; a.download = `${layerName}/${layerName}_punt_${numPunt}_foto_${i + 1}.jpg`;a.download = `${layerName}_${_sessionDate}/${layerName}_punt_${numPunt}_foto_${i + 1}.jpg`;= 'none';
             document.body.appendChild(a); a.click(); document.body.removeChild(a);
             setTimeout(() => URL.revokeObjectURL(dlUrl), 3000);
         } catch (err) {
