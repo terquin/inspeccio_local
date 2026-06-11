@@ -289,13 +289,22 @@ function initDB() {
     });
 }
 
-function saveBlobToDB(key, blob) {
+async function saveBlobToDB(key, blob) {
+    // Si la connexió s'ha tancat (pot passar en tornar del background),
+    // intentem reiniciar-la una vegada abans de fallar.
+    if (!db || db.version === 0) {
+        try { await initDB(); } catch (e) { throw new Error('DB no disponible'); }
+    }
     return new Promise((resolve, reject) => {
-        if (!db) return reject('DB no iniciada');
-        const tx = db.transaction([STORE_NAME], 'readwrite');
-        tx.objectStore(STORE_NAME).put(blob, key);
-        tx.oncomplete = () => resolve();
-        tx.onerror    = () => reject(tx.error);
+        try {
+            const tx = db.transaction([STORE_NAME], 'readwrite');
+            tx.objectStore(STORE_NAME).put(blob, key);
+            tx.oncomplete = () => resolve();
+            tx.onerror    = () => reject(tx.error);
+            tx.onabort    = () => reject(new Error('Transacció avortada'));
+        } catch (e) {
+            reject(e);
+        }
     });
 }
 
@@ -648,9 +657,11 @@ function openNewPointForm() {
 
     document.getElementById('photo-preview-container').innerHTML = '';
     document.getElementById('photo-preview-container').classList.add('hidden');
+    window._pendingPhotoKeys = [];
     document.getElementById('photo-status').innerText = 'Sense fotos noves';
     backdrop.classList.remove('hidden');
     setTimeout(() => formPanel.classList.remove('translate-y-full'), 10);
+    
 }
 
 function editPoint(id) {
@@ -666,6 +677,7 @@ function editPoint(id) {
 
     document.getElementById('photo-preview-container').innerHTML = '';
     document.getElementById('photo-preview-container').classList.add('hidden');
+    window._pendingPhotoKeys = [];
     document.getElementById('edit-photo-info').innerText =
         (f.properties.n_fotos > 0) ? `(${f.properties.n_fotos} desades)` : '';
     map.closePopup();
@@ -734,22 +746,22 @@ function cleanCache() {
     }
 }
 
+
 // ── CAPTURA DE FOTO ───────────────────────────────────────────
 async function handlePhoto(event) {
     const inputEl = event.target;
+    // Llegim els fitxers IMMEDIATAMENT i buidem l'input — si el procés
+    // es talla, no queda cap referència als fitxers originals de la càmera.
     const files = Array.from(inputEl.files || []);
+    inputEl.value = '';
     if (!files.length) return;
 
     const statusEl = document.getElementById('photo-status');
     const pc       = document.getElementById('photo-preview-container');
     pc.classList.remove('hidden');
 
-    statusEl.innerText = `⏳ Preparant fitxers...`;
-
-    const fileUrls = files.map(f => URL.createObjectURL(f));
-
-    const quality  = parseFloat(document.getElementById('quality-select').value) || 0.7;
-    const maxDim   = quality >= 1.0 ? 2048 : 1024; 
+    const quality = parseFloat(document.getElementById('quality-select').value) || 0.7;
+    const maxDim  = quality >= 1.0 ? 2048 : 1024;
 
     const numPunt = editingPointId
         ? savedPoints.find(f => f.id === editingPointId)?.properties.FID ?? getNextPointNumber()
@@ -757,38 +769,57 @@ async function handlePhoto(event) {
 
     const sessionPrefix = `tmp_${numPunt}_${Date.now()}`;
 
-    for (let i = 0; i < fileUrls.length; i++) {
-        statusEl.innerText = `⏳ Processant foto ${i + 1}/${fileUrls.length}...`;
-        await new Promise(r => setTimeout(r, 50)); 
+    for (let i = 0; i < files.length; i++) {
+        statusEl.innerText = `⏳ Processant foto ${i + 1}/${files.length}...`;
+        // Respira el thread perquè la UI es pugui actualitzar
+        await new Promise(r => setTimeout(r, 30));
 
-        let blob;
+        // --- Pas 1: crear ObjectURL i comprimir ---
+        let fileUrl = null;
+        let blob = null;
         try {
-            blob = await compressWithExif(fileUrls[i], quality, maxDim);
+            fileUrl = URL.createObjectURL(files[i]);
+            blob = await compressWithExif(fileUrl, quality, maxDim);
         } catch (err) {
-            console.error('Error compressió:', err);
+            console.error('Error compressió foto', i + 1, err);
             showNotification(`❌ Error processant foto ${i + 1}`, true);
-            URL.revokeObjectURL(fileUrls[i]);
             continue;
+        } finally {
+            // Allibera l'ObjectURL del fitxer original SEMPRE, fins i tot si falla
+            if (fileUrl) { URL.revokeObjectURL(fileUrl); fileUrl = null; }
         }
 
-        URL.revokeObjectURL(fileUrls[i]);
+        // --- Pas 2: desar a IndexedDB ---
         const dbKey = `${sessionPrefix}_${i}`;
-
         try {
             await saveBlobToDB(dbKey, blob);
         } catch (err) {
-            console.error('Error IndexedDB:', err);
+            console.error('Error IndexedDB foto', i + 1, err);
             showNotification(`❌ Error desant foto ${i + 1}`, true);
+            blob = null;
             continue;
         }
 
-        const filename = `${layerName}/${layerName}_punt_${numPunt}_foto_${i + 1}.jpg`;
-
+        // --- Pas 3: descàrrega a Downloads ---
+        // Fem la descàrrega amb el blob que ja tenim (sense rellegir d'IndexedDB)
+        // i revokem l'URL als 3 s — suficient perquè Android iniciï la descàrrega.
         try {
-            triggerDownload(blob, filename);
+            const dlUrl = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = dlUrl; a.download = `${layerName}/${layerName}_punt_${numPunt}_foto_${i + 1}.jpg`;
+            a.style.display = 'none';
+            document.body.appendChild(a); a.click(); document.body.removeChild(a);
+            setTimeout(() => URL.revokeObjectURL(dlUrl), 3000);
         } catch (err) {
             console.warn('Descàrrega fallida (no crític):', err);
         }
+
+        // --- Pas 4: alliberar el blob de RAM ABANS de la previsualització ---
+        // Llegim de nou des d'IndexedDB per a la previsualització.
+        // Això pot semblar redundant, però és clau: el blob de compressió queda
+        // alliberat pel GC aquí, i la previsualització usa el blob emmagatzemat.
+        blob = null;
+        await new Promise(r => setTimeout(r, 30)); // pausa per al GC
 
         try {
             const previewBlob = await getBlobFromDB(dbKey);
@@ -797,24 +828,27 @@ async function handlePhoto(event) {
                 const imgNode = document.createElement('img');
                 imgNode.className = 'rounded-lg max-h-24 object-cover w-full border';
                 imgNode.dataset.dbkey = dbKey;
-                imgNode.onload = () => URL.revokeObjectURL(previewUrl);
+                imgNode.onload  = () => URL.revokeObjectURL(previewUrl);
                 imgNode.onerror = () => URL.revokeObjectURL(previewUrl);
                 imgNode.src = previewUrl;
                 pc.appendChild(imgNode);
             }
         } catch (err) {
-            console.warn('Previsualització fallida:', err);
+            console.warn('Previsualització fallida (no crític):', err);
         }
 
+        // Registra la clau
         if (!window._pendingPhotoKeys) window._pendingPhotoKeys = [];
         window._pendingPhotoKeys.push(dbKey);
+
+        // Pausa entre fotos perquè el GC tingui temps d'actuar
+        if (i < files.length - 1) await new Promise(r => setTimeout(r, 150));
     }
 
     const total = (window._pendingPhotoKeys || []).length;
     statusEl.innerText = `${total} foto(es) ✓ (desades a Downloads)`;
-    
-    inputEl.value = '';
 }
+
 
 // ── GUARDAR PUNT ──────────────────────────────────────────────
 async function savePoint() {
@@ -1383,6 +1417,14 @@ window.onload = async () => {
     await initDB();
     initMap();
 };
+document.addEventListener('visibilitychange', async () => {
+    if (document.visibilityState !== 'visible') return;
+    if (!db || db.version === 0) {
+        console.log('DB tancada per background, reiniciant...');
+        try { await initDB(); } catch (e) { console.warn('Reinici DB fallit:', e); }
+    }
+});
+
 </script>
 
 </body>
