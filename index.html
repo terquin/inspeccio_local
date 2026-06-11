@@ -510,7 +510,65 @@ function renderDynamicFormFields(props = {}) {
         document.querySelectorAll('[id^="btn-dictate-"]').forEach(btn => btn.classList.add('hidden'));
     }
 }
+    
+// ── DIAGNÒSTIC DE MEMÒRIA I RENDIMENT ─────────────────────────
+// Registra cada pas del processament de foto amb temps i memòria.
+// Els logs apareixen a la consola del navegador (DevTools o adb logcat).
+// Per veure'ls a Android: chrome://inspect o connectar per USB i obrir DevTools.
+// També es desa l'últim error greu a localStorage per poder-lo consultar després.
 
+const _memLog = [];
+
+function _memMark(label) {
+    const entry = { t: Date.now(), label };
+
+    // performance.memory només disponible a Chrome/Android
+    if (window.performance && performance.memory) {
+        const m = performance.memory;
+        entry.usedMB  = (m.usedJSHeapSize  / 1048576).toFixed(1);
+        entry.totalMB = (m.totalJSHeapSize / 1048576).toFixed(1);
+        entry.limitMB = (m.jsHeapSizeLimit / 1048576).toFixed(1);
+        const pct = ((m.usedJSHeapSize / m.jsHeapSizeLimit) * 100).toFixed(0);
+        console.log(`[MEM] ${label} | ${entry.usedMB}MB / ${entry.limitMB}MB (${pct}%)`);
+    } else {
+        console.log(`[MEM] ${label} | (memòria no disponible en aquest navegador)`);
+    }
+
+    _memLog.push(entry);
+    // Mantenir només els últims 40 registres
+    if (_memLog.length > 40) _memLog.shift();
+}
+
+function _memError(label, err) {
+    const msg = `[ERROR] ${label}: ${err?.message || err}`;
+    console.error(msg, err);
+    // Desa l'últim error i el log complet a localStorage per consultar-ho
+    // fins i tot si la pàgina es recarrega posteriorment.
+    try {
+        localStorage.setItem('_last_photo_error', JSON.stringify({
+            moment: new Date().toISOString(),
+            label,
+            error: err?.message || String(err),
+            stack: err?.stack || '',
+            log: _memLog.slice(-20)
+        }));
+    } catch (_) {}
+}
+
+// Mostra l'últim error guardat (cridar des de la consola: showLastPhotoError())
+window.showLastPhotoError = function() {
+    const raw = localStorage.getItem('_last_photo_error');
+    if (!raw) { console.log('Cap error de foto registrat.'); return; }
+    const data = JSON.parse(raw);
+    console.group('Últim error de foto — ' + data.moment);
+    console.error('Punt de fallada:', data.label);
+    console.error('Missatge:', data.error);
+    if (data.stack) console.error('Stack:', data.stack);
+    console.table(data.log);
+    console.groupEnd();
+    return data;
+};
+    
 // ── COMPRESSIÓ + INJECCIÓ EXIF GPS ────────────────────────────
 function compressWithExif(fileUrl, quality, maxDim) {
     return new Promise(async (resolve, reject) => {
@@ -750,15 +808,14 @@ function cleanCache() {
     }
 }
 
-
-// ── CAPTURA DE FOTO ───────────────────────────────────────────
+    // ── CAPTURA DE FOTO ───────────────────────────────────────────
 async function handlePhoto(event) {
     const inputEl = event.target;
-    // Llegim els fitxers IMMEDIATAMENT i buidem l'input — si el procés
-    // es talla, no queda cap referència als fitxers originals de la càmera.
     const files = Array.from(inputEl.files || []);
     inputEl.value = '';
     if (!files.length) return;
+
+    _memMark('handlePhoto:inici');
 
     const statusEl = document.getElementById('photo-status');
     const pc       = document.getElementById('photo-preview-container');
@@ -774,82 +831,88 @@ async function handlePhoto(event) {
     const sessionPrefix = `tmp_${numPunt}_${Date.now()}`;
 
     for (let i = 0; i < files.length; i++) {
+        const fLabel = `foto${i + 1}/${files.length}`;
         statusEl.innerText = `⏳ Processant foto ${i + 1}/${files.length}...`;
-        // Respira el thread perquè la UI es pugui actualitzar
         await new Promise(r => setTimeout(r, 30));
 
-        // --- Pas 1: crear ObjectURL i comprimir ---
+        // PAS 1: comprimir
+        _memMark(`${fLabel}:abans-comprimir (mida original: ${(files[i].size/1024).toFixed(0)}KB)`);
         let fileUrl = null;
         let blob = null;
         try {
             fileUrl = URL.createObjectURL(files[i]);
             blob = await compressWithExif(fileUrl, quality, maxDim);
+            _memMark(`${fLabel}:comprimit (mida final: ${(blob.size/1024).toFixed(0)}KB)`);
         } catch (err) {
-            console.error('Error compressió foto', i + 1, err);
+            _memError(`${fLabel}:comprimir`, err);
             showNotification(`❌ Error processant foto ${i + 1}`, true);
             continue;
         } finally {
-            // Allibera l'ObjectURL del fitxer original SEMPRE, fins i tot si falla
             if (fileUrl) { URL.revokeObjectURL(fileUrl); fileUrl = null; }
         }
 
-        // --- Pas 2: desar a IndexedDB ---
+        // PAS 2: IndexedDB
         const dbKey = `${sessionPrefix}_${i}`;
+        _memMark(`${fLabel}:abans-indexeddb`);
         try {
             await saveBlobToDB(dbKey, blob);
+            _memMark(`${fLabel}:indexeddb-ok`);
         } catch (err) {
-            console.error('Error IndexedDB foto', i + 1, err);
+            _memError(`${fLabel}:indexeddb`, err);
             showNotification(`❌ Error desant foto ${i + 1}`, true);
             blob = null;
             continue;
         }
 
-        // --- Pas 3: descàrrega a Downloads ---
-        // Fem la descàrrega amb el blob que ja tenim (sense rellegir d'IndexedDB)
-        // i revokem l'URL als 3 s — suficient perquè Android iniciï la descàrrega.
+        // PAS 3: descàrrega
+        _memMark(`${fLabel}:abans-download`);
         try {
             const dlUrl = URL.createObjectURL(blob);
             const a = document.createElement('a');
-            a.href = dlUrl; a.download = `${layerName}/${layerName}_punt_${numPunt}_foto_${i + 1}.jpg`;a.download = `${layerName}_${_sessionDate}/${layerName}_punt_${numPunt}_foto_${i + 1}.jpg`;= 'none';
+            a.href = dlUrl;
+            a.download = `${layerName}_${_sessionDate}/${layerName}_punt_${numPunt}_foto_${i + 1}.jpg`;
+            a.style.display = 'none';
             document.body.appendChild(a); a.click(); document.body.removeChild(a);
             setTimeout(() => URL.revokeObjectURL(dlUrl), 3000);
+            _memMark(`${fLabel}:download-disparat`);
         } catch (err) {
+            _memError(`${fLabel}:download`, err);
             console.warn('Descàrrega fallida (no crític):', err);
         }
 
-        // --- Pas 4: alliberar el blob de RAM ABANS de la previsualització ---
-        // Llegim de nou des d'IndexedDB per a la previsualització.
-        // Això pot semblar redundant, però és clau: el blob de compressió queda
-        // alliberat pel GC aquí, i la previsualització usa el blob emmagatzemat.
+        // PAS 4: alliberar blob i previsualitzar
         blob = null;
-        await new Promise(r => setTimeout(r, 30)); // pausa per al GC
+        await new Promise(r => setTimeout(r, 50));
+        _memMark(`${fLabel}:blob-alliberat`);
 
         try {
             const previewBlob = await getBlobFromDB(dbKey);
             if (previewBlob) {
+                _memMark(`${fLabel}:abans-preview`);
                 const previewUrl = URL.createObjectURL(previewBlob);
                 const imgNode = document.createElement('img');
                 imgNode.className = 'rounded-lg max-h-24 object-cover w-full border';
                 imgNode.dataset.dbkey = dbKey;
-                imgNode.onload  = () => URL.revokeObjectURL(previewUrl);
-                imgNode.onerror = () => URL.revokeObjectURL(previewUrl);
+                imgNode.onload  = () => { URL.revokeObjectURL(previewUrl); _memMark(`${fLabel}:preview-carregada`); };
+                imgNode.onerror = () => { URL.revokeObjectURL(previewUrl); };
                 imgNode.src = previewUrl;
                 pc.appendChild(imgNode);
             }
         } catch (err) {
+            _memError(`${fLabel}:preview`, err);
             console.warn('Previsualització fallida (no crític):', err);
         }
 
-        // Registra la clau
         if (!window._pendingPhotoKeys) window._pendingPhotoKeys = [];
         window._pendingPhotoKeys.push(dbKey);
+        _memMark(`${fLabel}:fi`);
 
-        // Pausa entre fotos perquè el GC tingui temps d'actuar
         if (i < files.length - 1) await new Promise(r => setTimeout(r, 150));
     }
 
     const total = (window._pendingPhotoKeys || []).length;
     statusEl.innerText = `${total} foto(es) ✓ (desades a Downloads)`;
+    _memMark('handlePhoto:completat');
 }
 
 
