@@ -234,6 +234,9 @@
         <button onclick="exportGeoJSONonly()" class="w-full bg-teal-600 text-white py-3 rounded-lg font-bold flex items-center justify-center gap-2 shadow-sm mt-2">
             <i data-lucide="file-down"></i> Exportar GeoJSON directe
         </button>
+        <button onclick="exportDiagnosticZip()" class="w-full bg-purple-50 text-purple-700 py-3 rounded-lg font-semibold flex items-center justify-center gap-2 border border-purple-200 mt-2">
+            <i data-lucide="bug"></i> Descarregar diagnòstic d'errors
+        </button>
         <button onclick="clearData()" class="w-full bg-red-50 text-red-600 py-3 rounded-lg font-semibold flex items-center justify-center gap-2 border border-red-200 mt-4">
             <i data-lucide="trash-2"></i> Esborrar totes les dades
         </button>
@@ -568,6 +571,114 @@ window.showLastPhotoError = function() {
     console.groupEnd();
     return data;
 };
+
+// Genera un ZIP amb tots els logs i informació del dispositiu per enviar
+window.exportDiagnosticZip = async function() {
+    const lines = [];
+    const now = new Date().toISOString();
+
+    lines.push('=== DIAGNÒSTIC APP INSPECCIÓ DE CAMP ===');
+    lines.push('Data: ' + now);
+    lines.push('');
+
+    // Info dispositiu
+    lines.push('=== DISPOSITIU ===');
+    lines.push('User Agent: ' + navigator.userAgent);
+    lines.push('RAM declarada: ' + (navigator.deviceMemory || 'desconeguda') + ' GB');
+    lines.push('Nuclis CPU: ' + (navigator.hardwareConcurrency || 'desconegut'));
+    lines.push('Idioma: ' + navigator.language);
+    lines.push('Online: ' + navigator.onLine);
+    lines.push('');
+
+    // Memòria JS actual
+    lines.push('=== MEMÒRIA JS ACTUAL ===');
+    if (window.performance && performance.memory) {
+        const m = performance.memory;
+        lines.push('Heap usat:  ' + (m.usedJSHeapSize  / 1048576).toFixed(2) + ' MB');
+        lines.push('Heap total: ' + (m.totalJSHeapSize / 1048576).toFixed(2) + ' MB');
+        lines.push('Heap límit: ' + (m.jsHeapSizeLimit / 1048576).toFixed(2) + ' MB');
+        lines.push('% usat: ' + ((m.usedJSHeapSize / m.jsHeapSizeLimit) * 100).toFixed(1) + '%');
+    } else {
+        lines.push('performance.memory no disponible en aquest navegador');
+    }
+    lines.push('');
+
+    // Log de la sessió actual
+    lines.push('=== LOG DE MEMÒRIA SESSIÓ ACTUAL ===');
+    if (_memLog && _memLog.length) {
+        _memLog.forEach(e => {
+            const mem = e.usedMB ? `${e.usedMB}MB / ${e.limitMB}MB` : 'sense dades mem';
+            lines.push(`${e.t} | ${e.label} | ${mem}`);
+        });
+    } else {
+        lines.push('(cap activitat de foto en aquesta sessió)');
+    }
+    lines.push('');
+
+    // Últim error de foto
+    lines.push('=== ÚLTIM ERROR DE FOTO ===');
+    const rawErr = localStorage.getItem('_last_photo_error');
+    if (rawErr) {
+        try {
+            const d = JSON.parse(rawErr);
+            lines.push('Moment:          ' + d.moment);
+            lines.push('Punt de fallada: ' + d.label);
+            lines.push('Missatge error:  ' + d.error);
+            lines.push('Stack:           ' + (d.stack || 'no disponible'));
+            lines.push('');
+            lines.push('Log previ a l\'error:');
+            if (d.log && d.log.length) {
+                d.log.forEach(e => {
+                    const mem = e.usedMB ? `${e.usedMB}MB / ${e.limitMB}MB` : 'sense dades mem';
+                    lines.push(`  ${e.t} | ${e.label} | ${mem}`);
+                });
+            }
+        } catch (_) {
+            lines.push('Error llegint el log desat: ' + rawErr);
+        }
+    } else {
+        lines.push('Cap error registrat. Fes una foto que falli i torna a prémer aquest botó.');
+    }
+    lines.push('');
+
+    // Estat de les dades actuals
+    lines.push('=== DADES ACTUALS ===');
+    lines.push('Punts desats: ' + savedPoints.length);
+    lines.push('Nom capa: ' + layerName);
+    lines.push('Data sessió: ' + _sessionDate);
+    const totalFotos = savedPoints.reduce((s, f) => s + (f.properties.local_keys?.length || 0), 0);
+    lines.push('Total fotos a IndexedDB: ' + totalFotos);
+    lines.push('');
+
+    // Mida de localStorage
+    lines.push('=== LOCALSTORAGE ===');
+    try {
+        let lsSize = 0;
+        for (let k in localStorage) {
+            if (localStorage.hasOwnProperty(k)) lsSize += localStorage[k].length + k.length;
+        }
+        lines.push('Mida total: ' + (lsSize / 1024).toFixed(1) + ' KB');
+    } catch(_) { lines.push('No s\'ha pogut llegir'); }
+
+    // Genera el ZIP amb un sol fitxer de text
+    try {
+        const zip = new JSZip();
+        zip.file('diagnostic_' + now.replace(/[:.]/g, '-') + '.txt', lines.join('\n'));
+        const content = await zip.generateAsync({ type: 'blob' });
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(content);
+        a.download = `diagnostic_${_sessionDate}_${Date.now()}.zip`;
+        a.style.display = 'none';
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+        showNotification('✅ Fitxer diagnòstic descarregat!');
+    } catch(err) {
+        showNotification('❌ Error generant diagnòstic', true);
+        console.error(err);
+    }
+};    
     
 // ── COMPRESSIÓ + INJECCIÓ EXIF GPS ────────────────────────────
 function compressWithExif(fileUrl, quality, maxDim) {
