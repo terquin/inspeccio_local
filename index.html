@@ -234,21 +234,23 @@
         <button onclick="exportGeoJSONonly()" class="w-full bg-teal-600 text-white py-3 rounded-lg font-bold flex items-center justify-center gap-2 shadow-sm mt-2">
             <i data-lucide="file-down"></i> Exportar GeoJSON directe
         </button>
+        <button onclick="document.getElementById('import-file').click()" class="w-full bg-indigo-50 text-indigo-600 py-3 rounded-lg font-semibold flex items-center justify-center gap-2 border border-indigo-200 mt-2">
+            <i data-lucide="folder-up"></i> Importar ZIP / GeoJSON
+        </button>
         <button onclick="exportDiagnosticZip()" class="w-full bg-purple-50 text-purple-700 py-3 rounded-lg font-semibold flex items-center justify-center gap-2 border border-purple-200 mt-2">
             <i data-lucide="bug"></i> Descarregar diagnòstic d'errors
         </button>
-        <button onclick="clearData()" class="w-full bg-red-50 text-red-600 py-3 rounded-lg font-semibold flex items-center justify-center gap-2 border border-red-200 mt-4">
-            <i data-lucide="trash-2"></i> Esborrar totes les dades
-        </button>
+
         <button onclick="cleanCache()" class="w-full bg-orange-50 text-orange-600 py-3 rounded-lg font-semibold flex items-center justify-center gap-2 border border-orange-200 mt-2">
             <i data-lucide="cpu"></i> Netejar memòria cau (Caché)
         </button>
 
         <div class="h-px bg-gray-100 my-2"></div>
         
-        <button onclick="document.getElementById('import-file').click()" class="w-full bg-indigo-50 text-indigo-600 py-3 rounded-lg font-semibold flex items-center justify-center gap-2 border border-indigo-200 mt-2">
-            <i data-lucide="folder-up"></i> Importar ZIP / GeoJSON
+        <button onclick="clearData()" class="w-full bg-red-50 text-red-600 py-3 rounded-lg font-semibold flex items-center justify-center gap-2 border border-red-200 mt-4">
+            <i data-lucide="trash-2"></i> Esborrar totes les dades
         </button>
+        
         <input type="file" id="import-file" accept=".zip,.geojson,application/geo+json,application/zip" class="hidden" onchange="importData(event)">
   
     </div>
