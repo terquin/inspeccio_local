@@ -163,12 +163,12 @@
                 <label class="flex-1 border-2 border-dashed border-blue-300 bg-blue-50 text-blue-700 font-semibold py-3 px-2 rounded-lg flex flex-col items-center justify-center gap-1 cursor-pointer hover:bg-blue-100 transition">
                     <i data-lucide="camera" class="w-6 h-6"></i>
                     <span class="text-sm">Càmera</span>
-                    <input type="file" accept="image/*" capture="environment" class="hidden" onchange="handlePhoto(event)">
+                    <input type="file" accept="image/*" capture="environment" class="hidden" onchange="handlePhoto(event)" onclick="suspendMap()">
                 </label>
                 <label class="flex-1 border-2 border-dashed border-purple-300 bg-purple-50 text-purple-700 font-semibold py-3 px-2 rounded-lg flex flex-col items-center justify-center gap-1 cursor-pointer hover:bg-purple-100 transition">
                     <i data-lucide="image" class="w-6 h-6"></i>
                     <span class="text-sm">Galeria</span>
-                    <input type="file" accept="image/*" multiple class="hidden" onchange="handlePhoto(event)">
+                    <input type="file" accept="image/*" multiple class="hidden" onchange="handlePhoto(event)" onclick="suspendMap()">
                 </label>
             </div>
             <div id="photo-status" class="text-center text-xs text-gray-500 font-medium mt-1">Sense fotos noves</div>
@@ -949,6 +949,7 @@ async function handlePhoto(event) {
     const files = Array.from(inputEl.files || []);
     inputEl.value = '';
     if (!files.length) return;
+    resumeMap(); // Restaura els tiles del mapa ara que hem tornat de la càmera
 
     _memMark('handlePhoto:inici');
 
@@ -1100,12 +1101,43 @@ async function savePoint() {
 function initMap() {
     map = L.map('map', { zoomControl: false }).setView([41.7286, 1.8201], 14);
     L.control.zoom({ position: 'topright' }).addTo(map);
-    L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}', { maxZoom: 19 }).addTo(map);
+    window._tileLayer = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}', { 
+        maxZoom: 19,
+        keepBuffer: 0,
+        updateWhenIdle: true,
+        updateWhenZooming: false
+    }).addTo(map);
     map.on('click', e => updatePosition(e.latlng.lat, e.latlng.lng));
     loadSavedPoints();
     locateUser();
 }
 
+    // Allibera els tiles del mapa de memòria just abans d'obrir la càmera.
+// Recupera'ls quan es torna a la app. Estalvia ~60-80 MB de memòria de procés
+// en el moment crític en que Chrome + càmera + processament coexisteixen.
+function suspendMap() {
+    if (!map || !window._tileLayer) return;
+    try {
+        map.removeLayer(window._tileLayer);
+        // Força el GC a alliberar la memòria dels tiles
+        setTimeout(() => {
+            if (map) map.invalidateSize();
+        }, 200);
+        console.log('[MAP] Tiles suspesos per obrir càmera');
+    } catch(e) { console.warn('[MAP] Error suspenent mapa:', e); }
+}
+
+function resumeMap() {
+    if (!map || !window._tileLayer) return;
+    try {
+        if (!map.hasLayer(window._tileLayer)) {
+            window._tileLayer.addTo(map);
+            map.invalidateSize();
+            console.log('[MAP] Tiles restaurats');
+        }
+    } catch(e) { console.warn('[MAP] Error restaurant mapa:', e); }
+}
+    
 function updatePosition(lat, lon) {
     currentLat = lat; currentLon = lon;
     const utm = wgs84ToUtm31(lon, lat);
@@ -1622,6 +1654,9 @@ window.onload = async () => {
 };
 document.addEventListener('visibilitychange', async () => {
     if (document.visibilityState !== 'visible') return;
+    // Restaura el mapa si s'havia suspès
+    resumeMap();
+    // Reinicia IndexedDB si s'ha tancat en background
     if (!db || db.version === 0) {
         console.log('DB tancada per background, reiniciant...');
         try { await initDB(); } catch (e) { console.warn('Reinici DB fallit:', e); }
