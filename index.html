@@ -1005,7 +1005,8 @@ async function handlePhoto(event) {
             const dlUrl = URL.createObjectURL(blob);
             const a = document.createElement('a');
             a.href = dlUrl;
-            a.download = `${layerName}_${_sessionDate}/${layerName}_punt_${numPunt}_foto_${i + 1}.jpg`;
+            const fotoIndex = ((window._pendingPhotoKeys || []).length) + i + 1;
+            a.download = `${layerName}_${_sessionDate}/${layerName}_punt_${numPunt}_foto_${fotoIndex}.jpg`;
             a.style.display = 'none';
             document.body.appendChild(a); a.click(); document.body.removeChild(a);
             setTimeout(() => URL.revokeObjectURL(dlUrl), 3000);
