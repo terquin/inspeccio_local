@@ -281,7 +281,13 @@ const DB_NAME    = 'InspeccioCampDB';
 const STORE_NAME = 'photos';
 let db;
 
-function initDB() {
+async function initDB() {
+    // Demanar emmagatzematge persistent — evita que Chrome/Android
+    // esborri l'IndexedDB silenciosament quan hi ha poc espai al disc.
+    if (navigator.storage && navigator.storage.persist) {
+        const granted = await navigator.storage.persist();
+        console.log('Emmagatzematge persistent:', granted ? 'CONCEDIT' : 'DENEGAT');
+    }
     return new Promise((resolve, reject) => {
         const req = indexedDB.open(DB_NAME, 1);
         req.onerror = () => reject('IndexedDB error');
@@ -662,6 +668,22 @@ window.exportDiagnosticZip = async function() {
         lines.push('Mida total: ' + (lsSize / 1024).toFixed(1) + ' KB');
     } catch(_) { lines.push('No s\'ha pogut llegir'); }
 
+    // Espai al disc
+    lines.push('');
+    lines.push('=== ESPAI AL DISC ===');
+    if (navigator.storage && navigator.storage.estimate) {
+        try {
+            const est = await navigator.storage.estimate();
+            lines.push('Usat:       ' + (est.usage  / 1048576).toFixed(2) + ' MB');
+            lines.push('Disponible: ' + (est.quota  / 1048576).toFixed(2) + ' MB');
+            lines.push('% usat: '     + ((est.usage / est.quota) * 100).toFixed(1) + '%');
+            const persistent = navigator.storage.persist ? await navigator.storage.persisted() : 'desconegut';
+            lines.push('Persistent: ' + persistent);
+        } catch(_) { lines.push('Error llegint espai'); }
+    } else {
+        lines.push('navigator.storage.estimate no disponible');
+    }
+    
     // Genera el ZIP amb un sol fitxer de text
     try {
         const zip = new JSZip();
@@ -1133,7 +1155,8 @@ function refreshMapMarkers() {
         if (keys.length > 0) {
             imgHtml = `<div class="popup-fotos-label">${keys.length} foto(es):</div>`;
             keys.forEach((k, idx) => {
-                imgHtml += `<img id="pimg_${k.replace(/[^a-z0-9]/gi,'')}"
+                imgHtml += `<img id="pimg_${idx}_${f.id.slice(-6)}"
+                    data-dbkey="${k}"
                     style="width:100%;border-radius:4px;margin-top:4px;cursor:pointer;min-height:40px;background:#f3f4f6;"
                     alt="Carregant..."
                     onclick="openPhotoViewerFromKey('${k}')">`;
@@ -1169,13 +1192,13 @@ function refreshMapMarkers() {
         m.bindPopup(h, { maxWidth: 300 }).on('popupopen', async () => {
             lucide.createIcons();
             for (const k of keys) {
-                const imgEl = document.getElementById(`pimg_${k.replace(/[^a-z0-9]/gi,'')}`);
+                const imgEl = document.querySelector(`[data-dbkey="${k}"]`);
                 if (!imgEl) continue;
                 try {
                     const blob = await getBlobFromDB(k);
                     if (blob) {
                         const url = URL.createObjectURL(blob);
-                        imgEl.onload  = () => {}; 
+                        imgEl.onload  = () => URL.revokeObjectURL(url);
                         imgEl.onerror = () => { imgEl.alt = '⚠️ Error'; };
                         imgEl.src = url;
                         m.once('popupclose', () => URL.revokeObjectURL(url));
