@@ -1533,6 +1533,44 @@ async function exportDataAsZip() {
     }
 }
 
+// ── ADAPTAR CAMPS A PARTIR D'UN GEOJSON EXTERN ───────────────
+function detectAndAdaptFields(features) {
+    if (!features || features.length === 0) return false;
+
+    // Agafem les claus de propietats del primer feature (excloent les internes)
+    const internalKeys = new Set(['FID', 'num_punt', 'local_keys', 'n_fotos', 'revisat', 'data', 'hora']);
+    const fotoKeyPattern = /^foto_url_/;
+    const sampleProps = features[0].properties || {};
+    const importedKeys = Object.keys(sampleProps).filter(k => !internalKeys.has(k) && !fotoKeyPattern.test(k));
+
+    // Comprovem si coincideixen amb els labels dels customFields actuals
+    const currentLabels = new Set(customFields.map(cf => cf.label.toLowerCase()));
+    const hasMatch = importedKeys.some(k => currentLabels.has(k.toLowerCase()));
+
+    if (hasMatch) return false; // Ja coincideixen, no cal adaptar
+
+    // Preguntem a l'usuari
+    const msg = `La capa importada té camps diferents als actuals:\n\n` +
+        `Camps actuals: ${customFields.map(cf => cf.label).join(', ')}\n\n` +
+        `Camps del fitxer: ${importedKeys.join(', ')}\n\n` +
+        `Vols adaptar els camps del formulari als del fitxer importat?`;
+
+    if (!confirm(msg)) return false;
+
+    // Creem nous customFields a partir dels camps del fitxer
+    const newFields = importedKeys.map((key, i) => ({
+        id: 'cf_import_' + i + '_' + Date.now(),
+        label: key,
+        type: 'text'
+    }));
+
+    customFields = newFields;
+    localStorage.setItem('custom_fields', JSON.stringify(customFields));
+    renderAdminCustomFields();
+    showNotification('✅ Camps del formulari actualitzats!', false);
+    return true;
+}
+    
 // ── IMPORTAR ZIP / GEOJSON ──────────────────────────────────────────
 async function importData(event) {
     const file = event.target.files[0];
@@ -1553,7 +1591,7 @@ async function importData(event) {
             const geojsonText = await geojsonFile.async("string");
             const data = JSON.parse(geojsonText);
             if (data.type !== 'FeatureCollection' || !data.features) throw new Error('Format GeoJSON invàlid');
-
+            detectAndAdaptFields(data.features);
             let importedCount = 0;
             let fotosCount = 0;
 
@@ -1612,6 +1650,7 @@ async function importData(event) {
             try {
                 const data = JSON.parse(e.target.result);
                 if (data.type !== 'FeatureCollection' || !data.features) throw new Error('Format no vàlid');
+                detectAndAdaptFields(data.features);
                 const imported = data.features.map(f => {
                     if (f.properties && f.properties.num_punt !== undefined) {
                         f.properties.FID = f.properties.num_punt;
