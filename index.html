@@ -472,7 +472,10 @@ function renderDynamicFormFields(props = {}) {
     container.innerHTML = '';
     
     customFields.forEach(cf => {
-        let val = props[cf.label] !== undefined && props[cf.label] !== null ? props[cf.label] : '';
+    let val = '';
+    const labelLower = cf.label.toLowerCase();
+    const matchingKey = Object.keys(props).find(k => k.toLowerCase() === labelLower);
+    if (matchingKey !== undefined && props[matchingKey] !== null) val = props[matchingKey];
         if (val === '') {
             if (cf.id === 'cf_codi') val = props.codi || '';
             if (cf.id === 'cf_tipus') val = props.tipus || '';
@@ -1545,9 +1548,9 @@ function detectAndAdaptFields(features) {
 
     // Comprovem si coincideixen amb els labels dels customFields actuals
     const currentLabels = new Set(customFields.map(cf => cf.label.toLowerCase()));
-    const hasMatch = importedKeys.some(k => currentLabels.has(k.toLowerCase()));
-
-    if (hasMatch) return false; // Ja coincideixen, no cal adaptar
+    const matchCount = importedKeys.filter(k => currentLabels.has(k.toLowerCase())).length;
+    const matchRatio = importedKeys.length > 0 ? matchCount / importedKeys.length : 1;
+    if (matchRatio >= 0.5) return false;
 
     // Preguntem a l'usuari
     const msg = `La capa importada té camps diferents als actuals:\n\n` +
