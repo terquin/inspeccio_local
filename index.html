@@ -1115,6 +1115,7 @@ function initMap() {
     L.control.zoom({ position: 'topright' }).addTo(map);
     window._tileLayer = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}', { 
         maxZoom: 22,
+        maxNativeZoom: 17,
         keepBuffer: 0,
         updateWhenIdle: true,
         updateWhenZooming: false
