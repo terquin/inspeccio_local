@@ -1190,12 +1190,6 @@ function refreshMapMarkers() {
                 ? '#3b82f6'
                 : ({ 'Bo': '#22c55e', 'Regular': '#f59e0b', 'Dolent': '#ef4444' }[estat] || '#9ca3af'));
 
-        const icon = L.divIcon({
-            className: '',
-            html: `<div style="background:${color};width:18px;height:18px;border-radius:50% 50% 50% 0;transform:rotate(-45deg);border:2px solid white;box-shadow:0 2px 5px rgba(0,0,0,.3);"></div>`,
-            iconSize: [18, 18], iconAnchor: [9, 18]
-        });
-
         const m = L.marker([f.geometry.coordinates[1], f.geometry.coordinates[0]], { icon }).addTo(map);
 
         const keys = props.local_keys || [];
