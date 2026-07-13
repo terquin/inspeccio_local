@@ -1111,11 +1111,10 @@ async function savePoint() {
 
 // ── MAPA ──────────────────────────────────────────────────────
 function initMap() {
-    map = L.map('map', { zoomControl: false, maxZoom: 22 }).setView([41.7286, 1.8201], 14);
+    map = L.map('map', { zoomControl: false, maxZoom: 19 }).setView([41.7286, 1.8201], 14);
     L.control.zoom({ position: 'topright' }).addTo(map);
     window._tileLayer = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}', { 
-        maxZoom: 22,
-        maxNativeZoom: 17,
+        maxZoom: 19,
         keepBuffer: 0,
         updateWhenIdle: true,
         updateWhenZooming: false
