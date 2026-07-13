@@ -872,7 +872,16 @@ function editPoint(id) {
     document.getElementById('btn-delete-point').classList.remove('hidden');
     document.getElementById('new-point-id').innerText = `#${f.properties.FID}`;
     document.getElementById('revisat').checked = f.properties.revisat || false;
-    
+
+    // Recuperem la posició REAL del punt que estem editant,
+    // perquè savePoint() no la sobreescrigui amb el GPS actual.
+    currentLat = f.geometry.coordinates[1];
+    currentLon = f.geometry.coordinates[0];
+    const utmEdit = wgs84ToUtm31(currentLon, currentLat);
+    document.getElementById('lat-display').innerText = utmEdit.x.toFixed(2) + ' m';
+    document.getElementById('lon-display').innerText = utmEdit.y.toFixed(2) + ' m';
+    if (userMarker) userMarker.setLatLng([currentLat, currentLon]);
+
     renderDynamicFormFields(f.properties);
 
     document.getElementById('photo-preview-container').innerHTML = '';
