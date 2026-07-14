@@ -961,6 +961,14 @@ async function handlePhoto(event) {
     const files = Array.from(inputEl.files || []);
     inputEl.value = '';
     if (!files.length) return;
+
+    // Evita processar dos lots de fotos alhora (toc doble a Càmera/Galeria)
+    if (window._processingPhotos) {
+        showNotification('⏳ Encara s\'estan processant fotos anteriors, espera un moment', true);
+        return;
+    }
+    window._processingPhotos = true;
+
     resumeMap(); // Restaura els tiles del mapa ara que hem tornat de la càmera
 
     _memMark('handlePhoto:inici');
@@ -978,67 +986,34 @@ async function handlePhoto(event) {
 
     const sessionPrefix = `tmp_${numPunt}_${Date.now()}`;
 
-    for (let i = 0; i < files.length; i++) {
-        const fLabel = `foto${i + 1}/${files.length}`;
-        statusEl.innerText = `⏳ Processant foto ${i + 1}/${files.length}...`;
-        await new Promise(r => setTimeout(r, 30));
+    try {
+        for (let i = 0; i < files.length; i++) {
+            const fLabel = `foto${i + 1}/${files.length}`;
+            statusEl.innerText = `⏳ Processant foto ${i + 1}/${files.length}...`;
+            await new Promise(r => setTimeout(r, 30));
 
-        // PAS 1: comprimir
-        _memMark(`${fLabel}:abans-comprimir (mida original: ${(files[i].size/1024).toFixed(0)}KB)`);
-        let fileUrl = null;
-        let blob = null;
-        try {
-            fileUrl = URL.createObjectURL(files[i]);
-            blob = await compressWithExif(fileUrl, quality, maxDim);
-            _memMark(`${fLabel}:comprimit (mida final: ${(blob.size/1024).toFixed(0)}KB)`);
-        } catch (err) {
-            _memError(`${fLabel}:comprimir`, err);
-            showNotification(`❌ Error processant foto ${i + 1}`, true);
-            continue;
-        } finally {
-            if (fileUrl) { URL.revokeObjectURL(fileUrl); fileUrl = null; }
-        }
+            // PAS 1: comprimir
+            _memMark(`${fLabel}:abans-comprimir (mida original: ${(files[i].size/1024).toFixed(0)}KB)`);
+            let fileUrl = null;
+            let blob = null;
+            try {
+                fileUrl = URL.createObjectURL(files[i]);
+                blob = await compressWithExif(fileUrl, quality, maxDim);
+                _memMark(`${fLabel}:comprimit (mida final: ${(blob.size/1024).toFixed(0)}KB)`);
+            } catch (err) {
+                _memError(`${fLabel}:comprimir`, err);
+                showNotification(`❌ Error processant foto ${i + 1}`, true);
+                continue;
+            } finally {
+                if (fileUrl) { URL.revokeObjectURL(fileUrl); fileUrl = null; }
+            }
 
-        // PAS 2: IndexedDB
-        const dbKey = `${sessionPrefix}_${i}`;
-        _memMark(`${fLabel}:abans-indexeddb`);
-        try {
-            await saveBlobToDB(dbKey, blob);
-            _memMark(`${fLabel}:indexeddb-ok`);
-        } catch (err) {
-            _memError(`${fLabel}:indexeddb`, err);
-            showNotification(`❌ Error desant foto ${i + 1}`, true);
-            blob = null;
-            continue;
-        }
+            const dbKey = `${sessionPrefix}_${i}`;
 
-        // PAS 3: descàrrega
-        _memMark(`${fLabel}:abans-download`);
-        try {
-            const dlUrl = URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.href = dlUrl;
-            const fotoIndex = ((window._pendingPhotoKeys || []).length) + i + 1;
-            a.download = `${layerName}_${_sessionDate}/${layerName}_punt_${numPunt}_foto_${fotoIndex}.jpg`;
-            a.style.display = 'none';
-            document.body.appendChild(a); a.click(); document.body.removeChild(a);
-            setTimeout(() => URL.revokeObjectURL(dlUrl), 3000);
-            _memMark(`${fLabel}:download-disparat`);
-        } catch (err) {
-            _memError(`${fLabel}:download`, err);
-            console.warn('Descàrrega fallida (no crític):', err);
-        }
-
-        // PAS 4: alliberar blob i previsualitzar
-        blob = null;
-        await new Promise(r => setTimeout(r, 50));
-        _memMark(`${fLabel}:blob-alliberat`);
-
-        try {
-            const previewBlob = await getBlobFromDB(dbKey);
-            if (previewBlob) {
-                _memMark(`${fLabel}:abans-preview`);
-                const previewUrl = URL.createObjectURL(previewBlob);
+            // PAS 2: previsualització IMMEDIATA a partir del blob ja comprimit
+            // (abans es tornava a llegir d'IndexedDB, un viatge extra innecessari)
+            try {
+                const previewUrl = URL.createObjectURL(blob);
                 const imgNode = document.createElement('img');
                 imgNode.className = 'rounded-lg max-h-24 object-cover w-full border';
                 imgNode.dataset.dbkey = dbKey;
@@ -1046,21 +1021,51 @@ async function handlePhoto(event) {
                 imgNode.onerror = () => { URL.revokeObjectURL(previewUrl); };
                 imgNode.src = previewUrl;
                 pc.appendChild(imgNode);
+            } catch (err) {
+                _memError(`${fLabel}:preview`, err);
             }
-        } catch (err) {
-            _memError(`${fLabel}:preview`, err);
-            console.warn('Previsualització fallida (no crític):', err);
+
+            // PAS 3: descàrrega a Baixades (mateix blob, sense re-llegir res)
+            _memMark(`${fLabel}:abans-download`);
+            try {
+                const dlUrl = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = dlUrl;
+                const fotoIndex = ((window._pendingPhotoKeys || []).length) + i + 1;
+                a.download = `${layerName}_${_sessionDate}/${layerName}_punt_${numPunt}_foto_${fotoIndex}.jpg`;
+                a.style.display = 'none';
+                document.body.appendChild(a); a.click(); document.body.removeChild(a);
+                setTimeout(() => URL.revokeObjectURL(dlUrl), 3000);
+                _memMark(`${fLabel}:download-disparat`);
+            } catch (err) {
+                _memError(`${fLabel}:download`, err);
+                console.warn('Descàrrega fallida (no crític):', err);
+            }
+
+            // PAS 4: IndexedDB (per a miniatures futures i export ZIP).
+            // Si falla, la foto ja és a Baixades, així que no es perd.
+            _memMark(`${fLabel}:abans-indexeddb`);
+            try {
+                await saveBlobToDB(dbKey, blob);
+                _memMark(`${fLabel}:indexeddb-ok`);
+                if (!window._pendingPhotoKeys) window._pendingPhotoKeys = [];
+                window._pendingPhotoKeys.push(dbKey);
+            } catch (err) {
+                _memError(`${fLabel}:indexeddb`, err);
+                showNotification(`⚠️ Foto ${i + 1} desada a Baixades, però no a la base de dades (no sortirà al ZIP)`, true);
+            }
+
+            blob = null;
+            _memMark(`${fLabel}:fi`);
+
+            if (i < files.length - 1) await new Promise(r => setTimeout(r, 150));
         }
-
-        if (!window._pendingPhotoKeys) window._pendingPhotoKeys = [];
-        window._pendingPhotoKeys.push(dbKey);
-        _memMark(`${fLabel}:fi`);
-
-        if (i < files.length - 1) await new Promise(r => setTimeout(r, 150));
+    } finally {
+        window._processingPhotos = false;
     }
 
     const total = (window._pendingPhotoKeys || []).length;
-    statusEl.innerText = `${total} foto(es) ✓ (desades a Downloads)`;
+    statusEl.innerText = `${total} foto(es) ✓ (desades a Baixades)`;
     _memMark('handlePhoto:completat');
 }
 
