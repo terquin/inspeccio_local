@@ -708,33 +708,65 @@ window.exportDiagnosticZip = async function() {
 };    
     
 // ── COMPRESSIÓ + INJECCIÓ EXIF GPS ────────────────────────────
-function compressWithExif(fileUrl, quality, maxDim) {
+function compressWithExif(fileUrl, quality, maxDim, sourceFile) {
     return new Promise(async (resolve, reject) => {
-        let img;
+        // PAS A: llegim NOMÉS les dimensions originals (lleuger).
+        // No es dibuixa mai aquesta imatge, així que el navegador no
+        // necessita descomprimir-la sencera només per saber la mida.
+        let origW, origH;
         try {
-            img = await new Promise((res, rej) => {
-                const tempImg = new Image();
-                tempImg.onload = () => res(tempImg);
-                tempImg.onerror = () => rej(new Error('Càrrega imatge fallida.'));
-                tempImg.src = fileUrl;
+            const dims = await new Promise((res, rej) => {
+                const probe = new Image();
+                probe.onload = () => res({ w: probe.naturalWidth, h: probe.naturalHeight });
+                probe.onerror = () => rej(new Error('Càrrega imatge fallida.'));
+                probe.src = fileUrl;
             });
+            origW = dims.w; origH = dims.h;
         } catch (err) {
             return reject(err);
         }
 
-        let { width, height } = img;
+        let width = origW, height = origH;
         if (width > maxDim || height > maxDim) {
             if (width > height) { height = Math.round(height * maxDim / width); width = maxDim; }
             else                { width  = Math.round(width  * maxDim / height); height = maxDim; }
         }
 
+        // PAS B: descomprimim JA REDUÏDA amb createImageBitmap, perquè el
+        // navegador mai necessiti tenir la foto original sencera (que en
+        // mòbils moderns pot pesar centenars de MB) tota alhora a memòria.
+        let bitmap;
+        try {
+            if ('createImageBitmap' in window) {
+                bitmap = await createImageBitmap(sourceFile, {
+                    resizeWidth: width,
+                    resizeHeight: height,
+                    resizeQuality: 'medium'
+                });
+            }
+        } catch (err) {
+            console.warn('createImageBitmap amb resize ha fallat, es farà servir el mètode antic:', err);
+        }
+
         const canvas = document.createElement('canvas');
         canvas.width = width; canvas.height = height;
         const ctx = canvas.getContext('2d');
-        ctx.drawImage(img, 0, 0, width, height);
-        
-        img.src = '';
-        img = null;
+
+        if (bitmap) {
+            ctx.drawImage(bitmap, 0, 0, width, height);
+            bitmap.close();
+            bitmap = null;
+        } else {
+            // Reserva per navegadors molt antics sense createImageBitmap
+            const img = await new Promise((res, rej) => {
+                const tempImg = new Image();
+                tempImg.onload = () => res(tempImg);
+                tempImg.onerror = () => rej(new Error('Càrrega imatge fallida.'));
+                tempImg.src = fileUrl;
+            });
+            ctx.drawImage(img, 0, 0, width, height);
+            img.src = '';
+        }
 
         const q = quality >= 1.0 ? 0.99 : quality; 
         canvas.toBlob(async blob => {
@@ -989,7 +1021,7 @@ async function handlePhoto(event) {
         let blob = null;
         try {
             fileUrl = URL.createObjectURL(files[i]);
-            blob = await compressWithExif(fileUrl, quality, maxDim);
+            blob = await compressWithExif(fileUrl, quality, maxDim, files[i]);
             _memMark(`${fLabel}:comprimit (mida final: ${(blob.size/1024).toFixed(0)}KB)`);
         } catch (err) {
             _memError(`${fLabel}:comprimir`, err);
