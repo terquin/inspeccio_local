@@ -548,9 +548,23 @@ function _memMark(label) {
         console.log(`[MEM] ${label} | (memòria no disponible en aquest navegador)`);
     }
 
-    _memLog.push(entry);
+_memLog.push(entry);
     // Mantenir només els últims 40 registres
     if (_memLog.length > 40) _memLog.shift();
+
+    // ── RASTRE ANTI-PENJADA ─────────────────────────────────
+    // Guardem els últims 5 passos a localStorage de manera SÍNCRONA.
+    // Si l'app es penja o el sistema la mata de cop (per exemple per
+    // falta de memòria), aquest rastre sobreviu i podem veure després
+    // exactament on es va quedar aturada.
+    try {
+        let trail = [];
+        const raw = localStorage.getItem('_crash_trail');
+        if (raw) trail = JSON.parse(raw);
+        trail.push(entry);
+        if (trail.length > 5) trail.shift();
+        localStorage.setItem('_crash_trail', JSON.stringify(trail));
+    } catch (_) {}
 }
 
 function _memError(label, err) {
@@ -590,6 +604,23 @@ window.exportDiagnosticZip = async function() {
 
     lines.push('=== DIAGNÒSTIC APP INSPECCIÓ DE CAMP ===');
     lines.push('Data: ' + now);
+    lines.push('');
+
+    // Últims passos registrats (rastre anti-penjada)
+    lines.push('=== ÚLTIMS PASSOS ABANS D\'UN POSSIBLE TANCAMENT ===');
+    try {
+        const rawTrail = localStorage.getItem('_crash_trail');
+        if (rawTrail) {
+            const trail = JSON.parse(rawTrail);
+            trail.forEach(c => {
+                const ageSec = ((Date.now() - c.t) / 1000).toFixed(0);
+                const mem = c.usedMB ? `${c.usedMB}MB/${c.limitMB}MB` : 'sense dades mem';
+                lines.push(`  fa ${ageSec}s | ${c.label} | ${mem}`);
+            });
+        } else {
+            lines.push('(cap rastre registrat encara)');
+        }
+    } catch (_) { lines.push('Error llegint el rastre'); }
     lines.push('');
 
     // Info dispositiu
@@ -721,6 +752,7 @@ function compressWithExif(fileUrl, quality, maxDim) {
         } catch (err) {
             return reject(err);
         }
+        _memMark('compressWithExif:imatge-carregada');
 
         let { width, height } = img;
         if (width > maxDim || height > maxDim) {
@@ -732,6 +764,7 @@ function compressWithExif(fileUrl, quality, maxDim) {
         canvas.width = width; canvas.height = height;
         const ctx = canvas.getContext('2d');
         ctx.drawImage(img, 0, 0, width, height);
+        _memMark('compressWithExif:canvas-dibuixat');
         
         img.src = '';
         img = null;
@@ -742,8 +775,8 @@ function compressWithExif(fileUrl, quality, maxDim) {
             canvas.width = 1; canvas.height = 1; 
             
             if (!blob) { reject(new Error('toBlob fallida')); return; }
+            _memMark('compressWithExif:blob-generat');
             if (currentLat === null || currentLon === null) { resolve(blob); return; }
-
             try {
                 let exifObj = { "0th": {}, "Exif": {}, "GPS": {} };
 
@@ -801,7 +834,8 @@ function compressWithExif(fileUrl, quality, maxDim) {
                     blob.slice(offset)
                 ], { type: 'image/jpeg' });
 
-                resolve(finalBlob); 
+                _memMark('compressWithExif:exif-injectat');
+                resolve(finalBlob);
             } catch (err) {
                 console.error('Error injectant EXIF en binari:', err);
                 resolve(blob); 
@@ -1067,6 +1101,7 @@ async function handlePhoto(event) {
 
 // ── GUARDAR PUNT ──────────────────────────────────────────────
 async function savePoint() {
+    _memMark('savePoint:inici');
     if (currentLat === null) { showNotification('⚠️ GPS no disponible', true); return; }
 
     const isEdit  = editingPointId !== null;
@@ -1103,10 +1138,13 @@ async function savePoint() {
     f.properties.n_fotos = f.properties.local_keys.length;
 
     if (!isEdit) savedPoints.push(f);
+    _memMark('savePoint:abans-localStorage');
     localStorage.setItem('inspeccions_qgis', JSON.stringify(savedPoints));
+    _memMark('savePoint:abans-refreshMap');
     refreshMapMarkers();
     closeAllPanels();
     showNotification(`✅ Punt #${f.properties.FID} desat!`);
+    _memMark('savePoint:completat');
 }
 
 // ── MAPA ──────────────────────────────────────────────────────
@@ -1702,10 +1740,80 @@ function clearData() {
 }
 
 // ── INICIALITZACIÓ ────────────────────────────────────────────
+// ── DETECCIÓ DE PENJADES ANTERIORS ────────────────────────────
+function checkForCrash() {
+    try {
+        const raw = localStorage.getItem('_crash_trail');
+        if (!raw) return;
+        const trail = JSON.parse(raw);
+        if (!trail || !trail.length) return;
+        const last = trail[trail.length - 1];
+
+        // Passos que indiquen que el procés SÍ va acabar net
+        const safeEndings = ['handlePhoto:completat', 'savePoint:completat'];
+        if (safeEndings.includes(last.label)) return;
+
+        const ageMin = (Date.now() - last.t) / 60000;
+        if (ageMin > 30) return; // massa antic, no té sentit avisar
+
+        const mem = last.usedMB ? ` | Memòria: ${last.usedMB}MB / ${last.limitMB}MB` : '';
+        showNotification(`⚠️ La sessió anterior es va aturar al pas: "${last.label}"${mem}`, true);
+        console.warn('[CRASH DETECTAT] Rastre dels últims passos:', trail);
+    } catch (_) {}
+}
+
+// ── INICIALITZACIÓ ────────────────────────────────────────────
+// ── DETECCIÓ DE PENJADES ANTERIORS ────────────────────────────
+function checkForCrash() {
+    try {
+        const raw = localStorage.getItem('_crash_trail');
+        if (!raw) return;
+        const trail = JSON.parse(raw);
+        if (!trail || !trail.length) return;
+        const last = trail[trail.length - 1];
+
+        // Passos que indiquen que el procés SÍ va acabar net
+        const safeEndings = ['handlePhoto:completat', 'savePoint:completat'];
+        if (safeEndings.includes(last.label)) return;
+
+        const ageMin = (Date.now() - last.t) / 60000;
+        if (ageMin > 30) return; // massa antic, no té sentit avisar
+
+        const mem = last.usedMB ? ` | Memòria: ${last.usedMB}MB / ${last.limitMB}MB` : '';
+        showNotification(`⚠️ La sessió anterior es va aturar al pas: "${last.label}"${mem}`, true);
+        console.warn('[CRASH DETECTAT] Rastre dels últims passos:', trail);
+    } catch (_) {}
+}
+
+// ── DETECCIÓ DE PENJADES ANTERIORS ────────────────────────────
+function checkForCrash() {
+    try {
+        const raw = localStorage.getItem('_crash_trail');
+        if (!raw) return;
+        const trail = JSON.parse(raw);
+        if (!trail || !trail.length) return;
+        const last = trail[trail.length - 1];
+
+        // Passos que indiquen que el procés SÍ va acabar net
+        const safeEndings = ['handlePhoto:completat', 'savePoint:completat'];
+        if (safeEndings.includes(last.label)) return;
+
+        const ageMin = (Date.now() - last.t) / 60000;
+        if (ageMin > 30) return; // massa antic, no té sentit avisar
+
+        const mem = last.usedMB ? ` | Memòria: ${last.usedMB}MB / ${last.limitMB}MB` : '';
+        showNotification(`⚠️ La sessió anterior es va aturar al pas: "${last.label}"${mem}`, true);
+        console.warn('[CRASH DETECTAT] Rastre dels últims passos:', trail);
+    } catch (_) {}
+}
+
+// ── INICIALITZACIÓ ────────────────────────────────────────────
 window.onload = async () => {
     await initDB();
     initMap();
+    checkForCrash();
 };
+
 document.addEventListener('visibilitychange', async () => {
     if (document.visibilityState !== 'visible') return;
     // Restaura el mapa si s'havia suspès
