@@ -937,7 +937,7 @@ function deletePointById(id) {
     }
     savedPoints = savedPoints.filter(feat => feat.id !== id);
     localStorage.setItem('inspeccions_qgis', JSON.stringify(savedPoints));
-    refreshMapMarkers();
+    removeMarkerFromMap(id);
     closeAllPanels();
 }
 
@@ -1140,8 +1140,8 @@ async function savePoint() {
     if (!isEdit) savedPoints.push(f);
     _memMark('savePoint:abans-localStorage');
     localStorage.setItem('inspeccions_qgis', JSON.stringify(savedPoints));
-    _memMark('savePoint:abans-refreshMap');
-    refreshMapMarkers();
+    __memMark('savePoint:abans-upsertMarker');
+    upsertMarker(f);
     closeAllPanels();
     showNotification(`✅ Punt #${f.properties.FID} desat!`);
     _memMark('savePoint:completat');
@@ -1212,95 +1212,126 @@ function locateUser() {
     );
 }
 
-// ── MARCADORS AL MAPA ─────────────────────────────────────────
-function refreshMapMarkers() {
-    map.eachLayer(l => { if (l instanceof L.Marker && l !== userMarker) map.removeLayer(l); });
+// ── MARCADORS AL MAPA (gestió incremental) ─────────────────────
+let markersById = {};
 
-    savedPoints.forEach(f => {
-        const props = f.properties;
-        
-        // Colors segons compatibilitat antiga o revisió
-        let estat = props['Estat'] || props.estat || '';
-        const observacions = (props['GA_OBSERVACIONS'] || '').toString().trim();
-        let color = observacions !== ''
-            ? '#ef4444'
-            : (props.revisat
-                ? '#3b82f6'
-                : ({ 'Bo': '#22c55e', 'Regular': '#f59e0b', 'Dolent': '#ef4444' }[estat] || '#9ca3af'));
+function buildMarkerParts(f) {
+    const props = f.properties;
 
-        const icon = L.divIcon({
-            className: '',
-            html: `<div style="background:${color};width:18px;height:18px;border-radius:50% 50% 50% 0;transform:rotate(-45deg);border:2px solid white;box-shadow:0 2px 5px rgba(0,0,0,.3);"></div>`,
-            iconSize: [18, 18], iconAnchor: [9, 18]
-        });
+    let estat = props['Estat'] || props.estat || '';
+    const observacions = (props['GA_OBSERVACIONS'] || '').toString().trim();
+    let color = observacions !== ''
+        ? '#ef4444'
+        : (props.revisat
+            ? '#3b82f6'
+            : ({ 'Bo': '#22c55e', 'Regular': '#f59e0b', 'Dolent': '#ef4444' }[estat] || '#9ca3af'));
 
-        const m = L.marker([f.geometry.coordinates[1], f.geometry.coordinates[0]], { icon }).addTo(map);
-
-        const keys = props.local_keys || [];
-        let imgHtml = '';
-        if (keys.length > 0) {
-            imgHtml = `<div class="popup-fotos-label">${keys.length} foto(es):</div>`;
-            keys.forEach((k, idx) => {
-                imgHtml += `<img id="pimg_${idx}_${f.id.slice(-6)}"
-                    data-dbkey="${k}"
-                    style="width:100%;border-radius:4px;margin-top:4px;cursor:pointer;min-height:40px;background:#f3f4f6;"
-                    alt="Carregant..."
-                    onclick="openPhotoViewerFromKey('${k}')">`;
-            });
-        }
-
-        let h = `<div class="popup-content">
-            <div class="popup-id">#${props.FID}${props.revisat ? ' (REVISAT)' : ''}</div>`;
-        
-        // Mostrar camps personalitzats de forma dinàmica
-        customFields.forEach(cf => {
-            let val = props[cf.label] !== undefined ? props[cf.label] : '';
-            // Compatibilitat heretada
-            if (val === '') {
-                if (cf.id === 'cf_codi') val = props.codi || '';
-                if (cf.id === 'cf_tipus') val = props.tipus || '';
-                if (cf.id === 'cf_estat') val = props.estat || '';
-                if (cf.id === 'cf_notes') val = props.notes || '';
-            }
-            if (val !== null && val !== '') {
-                h += `<div class="popup-row"><b>${cf.label}:</b> ${val}</div>`;
-            }
-        });
-
-        h += imgHtml;
-        h += `<div style="text-align:right;margin-top:10px;display:flex;justify-content:flex-end;gap:8px;">
-            <button onclick="deletePointById('${f.id}')" style="background:#ef4444;color:white;padding:5px;border-radius:5px;">
-                <i data-lucide="trash-2" style="width:14px;"></i>
-            </button>
-            <button onclick="editPoint('${f.id}')" style="background:#3b82f6;color:white;padding:5px 10px;border-radius:5px;font-weight:bold;">✏️ Edita</button>
-        </div></div>`;
-
-        m.bindPopup(h, { maxWidth: 300 }).on('popupopen', async () => {
-            lucide.createIcons();
-            for (const k of keys) {
-                const imgEl = document.querySelector(`[data-dbkey="${k}"]`);
-                if (!imgEl) continue;
-                try {
-                    const blob = await getBlobFromDB(k);
-                    if (blob) {
-                        const url = URL.createObjectURL(blob);
-                        imgEl.onload  = () => URL.revokeObjectURL(url);
-                        imgEl.onerror = () => { imgEl.alt = '⚠️ Error'; };
-                        imgEl.src = url;
-                        m.once('popupclose', () => URL.revokeObjectURL(url));
-                    } else {
-                        imgEl.alt = '⚠️ Foto no trobada';
-                    }
-                } catch {
-                    imgEl.alt = '⚠️ Error';
-                }
-            }
-        });
+    const icon = L.divIcon({
+        className: '',
+        html: `<div style="background:${color};width:18px;height:18px;border-radius:50% 50% 50% 0;transform:rotate(-45deg);border:2px solid white;box-shadow:0 2px 5px rgba(0,0,0,.3);"></div>`,
+        iconSize: [18, 18], iconAnchor: [9, 18]
     });
 
+    const keys = props.local_keys || [];
+    let imgHtml = '';
+    if (keys.length > 0) {
+        imgHtml = `<div class="popup-fotos-label">${keys.length} foto(es):</div>`;
+        keys.forEach((k, idx) => {
+            imgHtml += `<img id="pimg_${idx}_${f.id.slice(-6)}"
+                data-dbkey="${k}"
+                style="width:100%;border-radius:4px;margin-top:4px;cursor:pointer;min-height:40px;background:#f3f4f6;"
+                alt="Carregant..."
+                onclick="openPhotoViewerFromKey('${k}')">`;
+        });
+    }
+
+    let h = `<div class="popup-content">
+        <div class="popup-id">#${props.FID}${props.revisat ? ' (REVISAT)' : ''}</div>`;
+
+    customFields.forEach(cf => {
+        let val = props[cf.label] !== undefined ? props[cf.label] : '';
+        if (val === '') {
+            if (cf.id === 'cf_codi') val = props.codi || '';
+            if (cf.id === 'cf_tipus') val = props.tipus || '';
+            if (cf.id === 'cf_estat') val = props.estat || '';
+            if (cf.id === 'cf_notes') val = props.notes || '';
+        }
+        if (val !== null && val !== '') {
+            h += `<div class="popup-row"><b>${cf.label}:</b> ${val}</div>`;
+        }
+    });
+
+    h += imgHtml;
+    h += `<div style="text-align:right;margin-top:10px;display:flex;justify-content:flex-end;gap:8px;">
+        <button onclick="deletePointById('${f.id}')" style="background:#ef4444;color:white;padding:5px;border-radius:5px;">
+            <i data-lucide="trash-2" style="width:14px;"></i>
+        </button>
+        <button onclick="editPoint('${f.id}')" style="background:#3b82f6;color:white;padding:5px 10px;border-radius:5px;font-weight:bold;">✏️ Edita</button>
+    </div></div>`;
+
+    return { icon, html: h, keys };
+}
+
+function bindPopupPhotoLoader(m, keys) {
+    m.on('popupopen', async () => {
+        lucide.createIcons();
+        for (const k of keys) {
+            const imgEl = document.querySelector(`[data-dbkey="${k}"]`);
+            if (!imgEl) continue;
+            try {
+                const blob = await getBlobFromDB(k);
+                if (blob) {
+                    const url = URL.createObjectURL(blob);
+                    imgEl.onload  = () => URL.revokeObjectURL(url);
+                    imgEl.onerror = () => { imgEl.alt = '⚠️ Error'; };
+                    imgEl.src = url;
+                    m.once('popupclose', () => URL.revokeObjectURL(url));
+                } else {
+                    imgEl.alt = '⚠️ Foto no trobada';
+                }
+            } catch {
+                imgEl.alt = '⚠️ Error';
+            }
+        }
+    });
+}
+
+// Crea o actualitza NOMÉS el marcador d'un punt concret.
+function upsertMarker(f) {
+    const { icon, html, keys } = buildMarkerParts(f);
+    const latlng = [f.geometry.coordinates[1], f.geometry.coordinates[0]];
+
+    let m = markersById[f.id];
+    if (m) {
+        m.setLatLng(latlng);
+        m.setIcon(icon);
+        m.setPopupContent(html);
+    } else {
+        m = L.marker(latlng, { icon }).addTo(map);
+        m.bindPopup(html, { maxWidth: 300 });
+        bindPopupPhotoLoader(m, keys);
+        markersById[f.id] = m;
+    }
     document.getElementById('points-count').innerText = savedPoints.length;
 }
 
+function removeMarkerFromMap(id) {
+    const m = markersById[id];
+    if (m) {
+        map.removeLayer(m);
+        delete markersById[id];
+    }
+    document.getElementById('points-count').innerText = savedPoints.length;
+}
+
+// Reconstrucció COMPLETA — només per a l'arrencada o després d'importar.
+function refreshMapMarkers() {
+    map.eachLayer(l => { if (l instanceof L.Marker && l !== userMarker) map.removeLayer(l); });
+    markersById = {};
+    savedPoints.forEach(f => upsertMarker(f));
+    document.getElementById('points-count').innerText = savedPoints.length;
+}
+    
 function loadSavedPoints() {
     const s = localStorage.getItem('inspeccions_qgis');
     if (s) { 
