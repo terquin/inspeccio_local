@@ -1937,50 +1937,6 @@ function clearData() {
 }
 
 // ── INICIALITZACIÓ ────────────────────────────────────────────
-// ── DETECCIÓ DE PENJADES ANTERIORS ────────────────────────────
-function checkForCrash() {
-    try {
-        const raw = localStorage.getItem('_crash_trail');
-        if (!raw) return;
-        const trail = JSON.parse(raw);
-        if (!trail || !trail.length) return;
-        const last = trail[trail.length - 1];
-
-        // Passos que indiquen que el procés SÍ va acabar net
-        const safeEndings = ['handlePhoto:completat', 'savePoint:completat'];
-        if (safeEndings.includes(last.label)) return;
-
-        const ageMin = (Date.now() - last.t) / 60000;
-        if (ageMin > 30) return; // massa antic, no té sentit avisar
-
-        const mem = last.usedMB ? ` | Memòria: ${last.usedMB}MB / ${last.limitMB}MB` : '';
-        showNotification(`⚠️ La sessió anterior es va aturar al pas: "${last.label}"${mem}`, true);
-        console.warn('[CRASH DETECTAT] Rastre dels últims passos:', trail);
-    } catch (_) {}
-}
-
-// ── INICIALITZACIÓ ────────────────────────────────────────────
-// ── DETECCIÓ DE PENJADES ANTERIORS ────────────────────────────
-function checkForCrash() {
-    try {
-        const raw = localStorage.getItem('_crash_trail');
-        if (!raw) return;
-        const trail = JSON.parse(raw);
-        if (!trail || !trail.length) return;
-        const last = trail[trail.length - 1];
-
-        // Passos que indiquen que el procés SÍ va acabar net
-        const safeEndings = ['handlePhoto:completat', 'savePoint:completat'];
-        if (safeEndings.includes(last.label)) return;
-
-        const ageMin = (Date.now() - last.t) / 60000;
-        if (ageMin > 30) return; // massa antic, no té sentit avisar
-
-        const mem = last.usedMB ? ` | Memòria: ${last.usedMB}MB / ${last.limitMB}MB` : '';
-        showNotification(`⚠️ La sessió anterior es va aturar al pas: "${last.label}"${mem}`, true);
-        console.warn('[CRASH DETECTAT] Rastre dels últims passos:', trail);
-    } catch (_) {}
-}
 
 // ── DETECCIÓ DE PENJADES ANTERIORS ────────────────────────────
 function checkForCrash() {
