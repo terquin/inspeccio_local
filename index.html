@@ -254,7 +254,7 @@
             <i data-lucide="trash-2"></i> Esborrar totes les dades
         </button>
         
-        <input type="file" id="import-file" accept=".zip,.geojson,application/geo+json,application/zip" class="hidden" onchange="importData(event)">
+        <input type="file" id="import-file" accept=".zip,.geojson,application/geo+json,application/zip,image/jpeg,image/png" multiple class="hidden" onchange="importData(event)">
   
     </div>
 </div>
@@ -1811,25 +1811,25 @@ function detectAndAdaptFields(features) {
     return true;
 }
     
-// ── IMPORTAR ZIP / GEOJSON ──────────────────────────────────────────
+// ── IMPORTAR ZIP / GEOJSON O ARXIUS SOLTS ──────────────────────────
 async function importData(event) {
-    const file = event.target.files[0];
-    if (!file) return;
+    const files = Array.from(event.target.files);
+    if (files.length === 0) return;
 
-    if (file.name.toLowerCase().endsWith('.zip')) {
+    // CAS 1: L'usuari ha pujat un sol arxiu ZIP
+    if (files.length === 1 && files[0].name.toLowerCase().endsWith('.zip')) {
         showNotification('⏳ Descomprimint ZIP i restaurant fotos...');
         try {
-            const zip = await JSZip.loadAsync(file);
+            const zip = await JSZip.loadAsync(files[0]);
             
             let geojsonFile = null;
-zip.forEach((relativePath, zipEntry) => {
-    // Ignorem carpetes Mac i arxius ocults
-    const isHidden = relativePath.includes('__MACOSX') || relativePath.split('/').pop().startsWith('._');
-    
-    if (relativePath.toLowerCase().endsWith('.geojson') && !isHidden) {
-        geojsonFile = zipEntry;
-    }
-});
+            zip.forEach((relativePath, zipEntry) => {
+                // Ignorem carpetes Mac i arxius ocults
+                const isHidden = relativePath.includes('__MACOSX') || relativePath.split('/').pop().startsWith('._');
+                if (relativePath.toLowerCase().endsWith('.geojson') && !isHidden) {
+                    geojsonFile = zipEntry;
+                }
+            });
 
             if (!geojsonFile) throw new Error('Cap arxiu GeoJSON trobat al ZIP');
 
@@ -1837,6 +1837,7 @@ zip.forEach((relativePath, zipEntry) => {
             const data = JSON.parse(geojsonText);
             if (data.type !== 'FeatureCollection' || !data.features) throw new Error('Format GeoJSON invàlid');
             detectAndAdaptFields(data.features);
+            
             let importedCount = 0;
             let fotosCount = 0;
 
@@ -1857,18 +1858,15 @@ zip.forEach((relativePath, zipEntry) => {
                 for (let pk of propKeys) {
                     if (pk.startsWith('foto_url_')) {
                         const photoPath = f.properties[pk];
-                        const pathParts = photoPath.split('/');
-                        const fileName = pathParts[pathParts.length - 1];
+                        const fileName = photoPath.split('/').pop();
 
                         let zipPhoto = null;
-                zip.forEach((relPath, entry) => {
-                // Ignorem carpetes Mac i arxius ocults
-               const isHidden = relPath.includes('__MACOSX') || relPath.split('/').pop().startsWith('._');
-    
-               if (relPath.endsWith(fileName) && !isHidden) {
-               zipPhoto = entry;
-               }
-               });
+                        zip.forEach((relPath, entry) => {
+                            const isHidden = relPath.includes('__MACOSX') || relPath.split('/').pop().startsWith('._');
+                            if (relPath.endsWith(fileName) && !isHidden) {
+                                zipPhoto = entry;
+                            }
+                        });
 
                         if (zipPhoto) {
                             const photoBlob = await zipPhoto.async("blob");
@@ -1888,20 +1886,37 @@ zip.forEach((relativePath, zipEntry) => {
             localStorage.setItem('inspeccions_qgis', JSON.stringify(savedPoints));
             refreshMapMarkers();
             closeAllPanels();
-            showNotification(`✅ ${importedCount} punts i ${fotosCount} fotos importats!`);
+            showNotification(`✅ ${importedCount} punts i ${fotosCount} fotos importats des del ZIP!`);
         } catch(err) {
             console.error(err);
             showNotification('❌ Error important el ZIP', true);
         }
     } 
+    // CAS 2: L'usuari ha pujat múltiples arxius (GeoJSON + Fotos) o un GeoJSON sol
     else {
+        showNotification('⏳ Processant arxius...');
+        
+        // Busquem quin dels arxius és el GeoJSON i quins són imatges
+        const geojsonFile = files.find(f => f.name.toLowerCase().endsWith('.geojson') || f.name.toLowerCase().endsWith('.json'));
+        const imageFiles = files.filter(f => f.type.startsWith('image/'));
+
+        if (!geojsonFile) {
+            showNotification('❌ No s\'ha trobat cap arxiu GeoJSON en la selecció', true);
+            event.target.value = '';
+            return;
+        }
+
         const reader = new FileReader();
-        reader.onload = e => {
+        reader.onload = async (e) => {
             try {
                 const data = JSON.parse(e.target.result);
                 if (data.type !== 'FeatureCollection' || !data.features) throw new Error('Format no vàlid');
                 detectAndAdaptFields(data.features);
-                const imported = data.features.map(f => {
+                
+                let importedCount = 0;
+                let fotosCount = 0;
+
+                for (let f of data.features) {
                     if (f.properties && f.properties.num_punt !== undefined) {
                         f.properties.FID = f.properties.num_punt;
                         delete f.properties.num_punt;
@@ -1911,19 +1926,41 @@ zip.forEach((relativePath, zipEntry) => {
                     f.geometry.coordinates = [wgs84.lon, wgs84.lat];
                     if (!f.properties.local_keys) f.properties.local_keys = [];
                     f.id = Date.now().toString() + Math.floor(Math.random() * 1000);
-                    return f;
-                });
-                savedPoints = savedPoints.concat(imported);
+
+                    // Emparellem les fotos pujades amb les que demana el GeoJSON
+                    const propKeys = Object.keys(f.properties);
+                    for (let pk of propKeys) {
+                        if (pk.startsWith('foto_url_')) {
+                            const photoPath = f.properties[pk];
+                            const fileName = photoPath.split('/').pop();
+
+                            // Busquem si entre els arxius pujats n'hi ha un amb aquest nom
+                            const matchingImage = imageFiles.find(img => img.name === fileName);
+
+                            if (matchingImage) {
+                                const dbKey = `import_${f.id}_${pk}`;
+                                await saveBlobToDB(dbKey, matchingImage);
+                                f.properties.local_keys.push(dbKey);
+                                fotosCount++;
+                            }
+                        }
+                    }
+
+                    f.properties.n_fotos = f.properties.local_keys.length;
+                    savedPoints.push(f);
+                    importedCount++;
+                }
+                
                 localStorage.setItem('inspeccions_qgis', JSON.stringify(savedPoints));
                 refreshMapMarkers();
                 closeAllPanels();
-                showNotification(`✅ ${imported.length} punts importats (sense fotos)!`);
+                showNotification(`✅ ${importedCount} punts i ${fotosCount} fotos importats amb èxit!`);
             } catch (err) {
                 showNotification('❌ Error al llegir el GeoJSON', true);
                 console.error(err);
             }
         };
-        reader.readAsText(file);
+        reader.readAsText(geojsonFile);
     }
     
     event.target.value = '';
