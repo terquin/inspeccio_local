@@ -1822,9 +1822,14 @@ async function importData(event) {
             const zip = await JSZip.loadAsync(file);
             
             let geojsonFile = null;
-            zip.forEach((relativePath, zipEntry) => {
-                if (relativePath.toLowerCase().endsWith('.geojson')) geojsonFile = zipEntry;
-            });
+zip.forEach((relativePath, zipEntry) => {
+    // Ignorem carpetes Mac i arxius ocults
+    const isHidden = relativePath.includes('__MACOSX') || relativePath.split('/').pop().startsWith('._');
+    
+    if (relativePath.toLowerCase().endsWith('.geojson') && !isHidden) {
+        geojsonFile = zipEntry;
+    }
+});
 
             if (!geojsonFile) throw new Error('Cap arxiu GeoJSON trobat al ZIP');
 
@@ -1856,9 +1861,14 @@ async function importData(event) {
                         const fileName = pathParts[pathParts.length - 1];
 
                         let zipPhoto = null;
-                        zip.forEach((relPath, entry) => {
-                            if (relPath.endsWith(fileName)) zipPhoto = entry;
-                        });
+                zip.forEach((relPath, entry) => {
+                // Ignorem carpetes Mac i arxius ocults
+               const isHidden = relPath.includes('__MACOSX') || relPath.split('/').pop().startsWith('._');
+    
+               if (relPath.endsWith(fileName) && !isHidden) {
+               zipPhoto = entry;
+               }
+               });
 
                         if (zipPhoto) {
                             const photoBlob = await zipPhoto.async("blob");
