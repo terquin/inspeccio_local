@@ -1858,22 +1858,26 @@ async function importData(event) {
                 for (let pk of propKeys) {
                     if (pk.startsWith('foto_url_')) {
                         const photoPath = f.properties[pk];
-                        const fileName = photoPath.split('/').pop();
+                        
+                        // CORRECCIÓ: Comprovem que photoPath existeix i és un text abans de fer l'split
+                        if (photoPath && typeof photoPath === 'string') {
+                            const fileName = photoPath.split('/').pop();
 
-                        let zipPhoto = null;
-                        zip.forEach((relPath, entry) => {
-                            const isHidden = relPath.includes('__MACOSX') || relPath.split('/').pop().startsWith('._');
-                            if (relPath.endsWith(fileName) && !isHidden) {
-                                zipPhoto = entry;
+                            let zipPhoto = null;
+                            zip.forEach((relPath, entry) => {
+                                const isHidden = relPath.includes('__MACOSX') || relPath.split('/').pop().startsWith('._');
+                                if (relPath.endsWith(fileName) && !isHidden) {
+                                    zipPhoto = entry;
+                                }
+                            });
+
+                            if (zipPhoto) {
+                                const photoBlob = await zipPhoto.async("blob");
+                                const dbKey = `import_${f.id}_${pk}`;
+                                await saveBlobToDB(dbKey, photoBlob);
+                                f.properties.local_keys.push(dbKey);
+                                fotosCount++;
                             }
-                        });
-
-                        if (zipPhoto) {
-                            const photoBlob = await zipPhoto.async("blob");
-                            const dbKey = `import_${f.id}_${pk}`;
-                            await saveBlobToDB(dbKey, photoBlob);
-                            f.properties.local_keys.push(dbKey);
-                            fotosCount++;
                         }
                     }
                 }
@@ -1932,16 +1936,20 @@ async function importData(event) {
                     for (let pk of propKeys) {
                         if (pk.startsWith('foto_url_')) {
                             const photoPath = f.properties[pk];
-                            const fileName = photoPath.split('/').pop();
+                            
+                            // CORRECCIÓ: Comprovem que photoPath existeix i és un text abans de fer l'split
+                            if (photoPath && typeof photoPath === 'string') {
+                                const fileName = photoPath.split('/').pop();
 
-                            // Busquem si entre els arxius pujats n'hi ha un amb aquest nom
-                            const matchingImage = imageFiles.find(img => img.name === fileName);
+                                // Busquem si entre els arxius pujats n'hi ha un amb aquest nom
+                                const matchingImage = imageFiles.find(img => img.name === fileName);
 
-                            if (matchingImage) {
-                                const dbKey = `import_${f.id}_${pk}`;
-                                await saveBlobToDB(dbKey, matchingImage);
-                                f.properties.local_keys.push(dbKey);
-                                fotosCount++;
+                                if (matchingImage) {
+                                    const dbKey = `import_${f.id}_${pk}`;
+                                    await saveBlobToDB(dbKey, matchingImage);
+                                    f.properties.local_keys.push(dbKey);
+                                    fotosCount++;
+                                }
                             }
                         }
                     }
