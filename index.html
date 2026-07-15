@@ -234,6 +234,9 @@
         <button onclick="exportGeoJSONonly()" class="w-full bg-teal-600 text-white py-3 rounded-lg font-bold flex items-center justify-center gap-2 shadow-sm mt-2">
             <i data-lucide="file-down"></i> Exportar GeoJSON directe
         </button>
+        <button onclick="exportHtmlReport()" class="w-full bg-pink-600 text-white py-3 rounded-lg font-bold flex items-center justify-center gap-2 shadow-sm mt-2">
+            <i data-lucide="image"></i> Exportar Informe HTML (amb fotos)
+        </button>
         <button onclick="document.getElementById('import-file').click()" class="w-full bg-indigo-50 text-indigo-600 py-3 rounded-lg font-semibold flex items-center justify-center gap-2 border border-indigo-200 mt-2">
             <i data-lucide="folder-up"></i> Importar ZIP / GeoJSON
         </button>
@@ -1613,6 +1616,159 @@ async function exportDataAsZip() {
         showNotification('✅ ZIP descarregat!');
     } catch (err) {
         showNotification('❌ Error generant ZIP', true);
+        console.error(err);
+    }
+}
+
+// ── EXPORTAR INFORME HTML AMB FOTOS ────────────────────────────
+function blobToDataUrl(blob) {
+    return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload  = () => resolve(reader.result);
+        reader.onerror = () => reject(new Error('Error llegint la imatge'));
+        reader.readAsDataURL(blob);
+    });
+}
+
+// Redueix la foto NOMÉS per a l'informe (les originals no es toquen).
+function resizeBlobForReport(blob, maxDim, quality) {
+    return new Promise((resolve, reject) => {
+        const url = URL.createObjectURL(blob);
+        const img = new Image();
+        img.onload = () => {
+            let { width, height } = img;
+            if (width > maxDim || height > maxDim) {
+                if (width > height) { height = Math.round(height * maxDim / width); width = maxDim; }
+                else                { width  = Math.round(width  * maxDim / height); height = maxDim; }
+            }
+            const canvas = document.createElement('canvas');
+            canvas.width = width; canvas.height = height;
+            const ctx = canvas.getContext('2d');
+            ctx.drawImage(img, 0, 0, width, height);
+            URL.revokeObjectURL(url);
+            canvas.toBlob(smallBlob => {
+                canvas.width = 1; canvas.height = 1;
+                if (!smallBlob) { reject(new Error('No s\'ha pogut reduir la foto')); return; }
+                resolve(smallBlob);
+            }, 'image/jpeg', quality);
+        };
+        img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('No s\'ha pogut carregar la foto')); };
+        img.src = url;
+    });
+}
+
+async function exportHtmlReport() {
+    if (!savedPoints.length) { showNotification('⚠️ No hi ha punts per exportar', true); return; }
+    showNotification('⏳ Generant informe HTML (pot trigar si hi ha moltes fotos)...');
+
+    const sorted = [...savedPoints].sort((a, b) => (a.properties.FID || 0) - (b.properties.FID || 0));
+    let cardsHtml = '';
+
+    for (const f of sorted) {
+        const props = f.properties;
+        const utm = wgs84ToUtm31(f.geometry.coordinates[0], f.geometry.coordinates[1]);
+
+        let estat = props['Estat'] || props.estat || '';
+        const observacions = (props['GA_OBSERVACIONS'] || '').toString().trim();
+        let borderColor = observacions !== ''
+            ? '#ef4444'
+            : (props.revisat
+                ? '#3b82f6'
+                : ({ 'Bo': '#22c55e', 'Regular': '#f59e0b', 'Dolent': '#ef4444' }[estat] || '#9ca3af'));
+
+        let fieldsHtml = '';
+        customFields.forEach(cf => {
+            let val = props[cf.label] !== undefined ? props[cf.label] : '';
+            if (val === '') {
+                if (cf.id === 'cf_codi') val = props.codi || '';
+                if (cf.id === 'cf_tipus') val = props.tipus || '';
+                if (cf.id === 'cf_estat') val = props.estat || '';
+                if (cf.id === 'cf_notes') val = props.notes || '';
+            }
+            if (val !== null && val !== '') {
+                fieldsHtml += `<tr><td class="field-label">${cf.label}</td><td>${val}</td></tr>`;
+            }
+        });
+
+        let photosHtml = '';
+        const keys = props.local_keys || [];
+        for (const k of keys) {
+            try {
+                const blob = await getBlobFromDB(k);
+                if (!blob) continue;
+                const smallBlob = await resizeBlobForReport(blob, 700, 0.6);
+                const dataUrl = await blobToDataUrl(smallBlob);
+                photosHtml += `<img class="report-photo" src="${dataUrl}" alt="Foto punt ${props.FID}">`;
+            } catch (err) {
+                console.warn('No s\'ha pogut afegir una foto a l\'informe:', err);
+            }
+        }
+
+        cardsHtml += `
+        <div class="point-card" style="border-left-color:${borderColor};">
+            <div class="point-header">
+                <span class="point-id">#${props.FID}</span>
+                ${props.revisat ? '<span class="badge-blue">REVISAT</span>' : ''}
+                <span class="point-coords">X: ${utm.x.toFixed(2)} m &nbsp; Y: ${utm.y.toFixed(2)} m</span>
+            </div>
+            ${fieldsHtml ? `<table class="fields-table">${fieldsHtml}</table>` : ''}
+            ${photosHtml ? `<div class="photos-grid">${photosHtml}</div>` : '<p class="no-photos">Sense fotos</p>'}
+        </div>`;
+    }
+
+    const now = new Date();
+    const dateStr = now.toLocaleDateString('ca-ES', { year: 'numeric', month: 'long', day: 'numeric' });
+
+    const fullHtml = `<!DOCTYPE html>
+<html lang="ca">
+<head>
+<meta charset="UTF-8">
+<title>Informe ${layerName}</title>
+<style>
+    body { font-family: -apple-system, Segoe UI, Roboto, Arial, sans-serif; background:#f3f4f6; margin:0; padding:20px; color:#1f2937; }
+    .report-header { text-align:center; margin-bottom:24px; }
+    .report-header h1 { margin:0 0 4px; font-size:22px; }
+    .report-header p { margin:0; color:#6b7280; font-size:13px; }
+    .point-card {
+        background:white; border-left:6px solid #9ca3af; border-radius:8px;
+        box-shadow:0 1px 3px rgba(0,0,0,.1); padding:16px; margin-bottom:16px;
+        page-break-inside: avoid;
+    }
+    .point-header { display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin-bottom:10px; }
+    .point-id { font-family:monospace; background:#eff6ff; color:#1d4ed8; border:1px solid #bfdbfe; border-radius:4px; padding:3px 8px; font-weight:bold; }
+    .badge-blue { background:#3b82f6; color:white; padding:3px 8px; border-radius:4px; font-size:11px; font-weight:bold; }
+    .point-coords { margin-left:auto; font-family:monospace; font-size:12px; color:#6b7280; }
+    .fields-table { width:100%; border-collapse:collapse; font-size:13px; margin-bottom:10px; }
+    .fields-table td { padding:4px 6px; border-bottom:1px solid #f3f4f6; vertical-align:top; }
+    .field-label { font-weight:bold; color:#374151; width:35%; white-space:nowrap; }
+    .photos-grid { display:flex; flex-wrap:wrap; gap:8px; }
+    .report-photo { width:180px; height:180px; object-fit:cover; border-radius:6px; border:1px solid #e5e7eb; }
+    .no-photos { color:#9ca3af; font-size:12px; font-style:italic; margin:0; }
+    @media print {
+        body { background:white; padding:0; }
+        .point-card { box-shadow:none; border:1px solid #e5e7eb; border-left-width:6px; }
+    }
+</style>
+</head>
+<body>
+    <div class="report-header">
+        <h1>Informe d'Inspecció — ${layerName}</h1>
+        <p>Generat el ${dateStr} · ${sorted.length} punts</p>
+    </div>
+    ${cardsHtml}
+</body>
+</html>`;
+
+    try {
+        const blob = new Blob([fullHtml], { type: 'text/html' });
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = `${layerName}_informe_${Date.now()}.html`;
+        a.click();
+        setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+        showNotification('✅ Informe HTML descarregat!');
+    } catch (err) {
+        showNotification('❌ Error generant l\'informe', true);
         console.error(err);
     }
 }
