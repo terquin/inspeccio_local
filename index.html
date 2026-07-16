@@ -1,3 +1,273 @@
+<!DOCTYPE html>
+<html lang="ca">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Inspecció de Camp</title>
+
+    <link rel="manifest" href="manifest.json">
+
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="Inspecció">
+    <meta name="theme-color" content="#2563eb">
+    <link rel="apple-touch-icon" href="https://cdn.jsdelivr.net/npm/lucide-static@0.344.0/icons/map-pin.svg">
+    <link rel="icon" type="image/svg+xml" sizes="any" href="https://cdn.jsdelivr.net/npm/lucide-static@0.344.0/icons/map-pin.svg">
+
+    <script>
+        if ('serviceWorker' in navigator) {
+            window.addEventListener('load', () => {
+                try {
+                    const isHttp = window.location.protocol === 'http:' || window.location.protocol === 'https:';
+                    const isNotBlob = !window.location.href.startsWith('blob:');
+                    
+                    if (isHttp && isNotBlob) {
+                        navigator.serviceWorker.register('sw.js')
+                            .then(reg => console.log('Service Worker registrat amb èxit'))
+                            .catch(err => console.warn('Avís al registrar Service Worker:', err));
+                    }
+                } catch (err) {
+                    console.warn('Registre del Service Worker omès per restriccions.', err);
+                }
+            });
+        }
+    </script>
+
+    <script src="https://cdn.jsdelivr.net/npm/piexifjs@1.0.6/piexif.js"></script> 
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin=""/>
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/proj4js/2.9.0/proj4.js"></script>
+
+    <style>
+        @keyframes pulse-mic {
+            0% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.4); }
+            70% { box-shadow: 0 0 0 8px rgba(239, 68, 68, 0); }
+            100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0); }
+        }
+        .mic-recording {
+            background-color: #fee2e2 !important;
+            color: #ef4444 !important;
+            border-color: #fca5a5 !important;
+            animation: pulse-mic 1.5s infinite;
+        }
+
+        body, html { margin:0; padding:0; height:100%; width:100%; overflow:hidden; background:#f3f4f6; }
+        #map { height:100vh; width:100%; z-index:1; }
+        ::-webkit-scrollbar { width:6px; }
+        ::-webkit-scrollbar-thumb { background:#cbd5e1; border-radius:10px; }
+        #notification-area {
+            position:fixed; top:20px; left:50%; transform:translateX(-50%);
+            z-index:9999; width:90%; max-width:400px;
+        }
+        .notification {
+            background:#10b981; color:white; padding:12px; border-radius:8px;
+            margin-bottom:10px; text-align:center; box-shadow:0 4px 6px rgba(0,0,0,.1);
+            transition:opacity .5s ease;
+        }
+        .notification.error { background:#ef4444; }
+        .notification.info  { background:#3b82f6; }
+        .popup-content { font-size:13px; min-width:200px; max-width:280px; }
+        .popup-content b { color:#374151; }
+        .popup-content .popup-id {
+            background:#eff6ff; border:1px solid #bfdbfe; border-radius:4px;
+            padding:2px 6px; font-size:11px; color:#1d4ed8; font-family:monospace;
+            margin-bottom:6px; display:inline-block;
+        }
+        .popup-content .popup-row { border-bottom:1px solid #f3f4f6; padding:3px 0; }
+        .popup-content .popup-fotos-label { font-size:11px; color:#6b7280; margin-top:4px; }
+    </style>
+</head>
+<body class="relative">
+
+<div id="notification-area"></div>
+<div id="map"></div>
+
+<div class="fixed bottom-8 right-4 flex flex-col gap-4 z-[400]">
+    <button onclick="openToolsPanel()" title="Gestió de dades"
+        class="bg-white p-3 rounded-full shadow-lg text-gray-700 hover:bg-gray-100 flex justify-center items-center">
+        <i data-lucide="settings"></i>
+    </button>
+    <button onclick="locateUser()" title="Localitzar-me"
+        class="bg-white p-3 rounded-full shadow-lg text-blue-600 hover:bg-gray-100 flex justify-center items-center">
+        <i data-lucide="crosshair"></i>
+    </button>
+    <button onclick="openNewPointForm()" title="Nou punt"
+        class="bg-blue-600 text-white p-4 rounded-full shadow-lg hover:bg-blue-700 flex justify-center items-center transition transform active:scale-95">
+        <i data-lucide="plus" class="w-8 h-8"></i>
+    </button>
+</div>
+
+<div id="backdrop" class="fixed inset-0 bg-black/40 z-[500] hidden" onclick="closeAllPanels()"></div>
+
+<div id="form-panel" class="fixed inset-x-0 bottom-0 z-[600] bg-white rounded-t-3xl shadow-2xl transform translate-y-full transition-transform duration-300 max-h-[92vh] flex flex-col">
+    <div class="p-5 border-b flex justify-between items-center sticky top-0 bg-white rounded-t-3xl z-10">
+        <h1 class="text-xl font-bold text-gray-800 flex items-center gap-2">
+            <i data-lucide="map-pin" class="text-red-500"></i> <span id="form-title-text">Nou Punt</span>
+        </h1>
+        <div class="flex items-center gap-2">
+            <span id="new-point-id" class="text-xs bg-blue-50 text-blue-600 font-mono px-2 py-1 rounded-full border border-blue-200"></span>
+            <button id="btn-delete-point" onclick="deleteCurrentPoint()" class="hidden text-red-500 hover:bg-red-50 p-2 rounded-full mr-1">
+                <i data-lucide="trash-2"></i>
+            </button>
+            <button onclick="closeAllPanels()" class="text-gray-500 hover:bg-gray-100 p-2 rounded-full">
+                <i data-lucide="x"></i>
+            </button>
+        </div>
+    </div>
+    <div class="p-5 overflow-y-auto flex flex-col gap-4">
+        
+        <div class="flex items-center gap-3 bg-gray-50 p-3 rounded-xl border border-gray-200">
+            <input type="checkbox" id="revisat" class="w-6 h-6 text-blue-600 border-gray-300 rounded focus:ring-blue-500 cursor-pointer">
+            <label for="revisat" class="font-bold text-gray-700 cursor-pointer">Marcar com a REVISAT</label>
+        </div>
+
+        <div class="bg-blue-50 p-3 rounded-lg text-xs text-blue-700" id="form-info-gps">
+            <i data-lucide="info" class="inline w-4 h-4"></i> Si no tens GPS, tanca i toca el mapa per situar-te.
+        </div>
+        
+        <div class="bg-gray-50 p-3 rounded-lg text-sm text-gray-600 font-mono flex justify-between items-center">
+            <div><strong>X:</strong> <span id="lat-display">Buscant...</span></div>
+            <div><strong>Y:</strong> <span id="lon-display">Buscant...</span></div>
+            <button onclick="locateUser()" class="text-blue-500 p-1"><i data-lucide="locate" class="w-4 h-4"></i></button>
+        </div>
+
+        <div id="dynamic-fields-container" class="flex flex-col gap-4"></div>
+        
+        <div class="flex flex-col gap-1">
+            <label class="font-semibold text-gray-700 text-sm">
+                Fotografies
+                <span class="text-gray-400 font-normal text-xs" id="edit-photo-info"></span>
+                <span class="text-gray-400 font-normal text-xs ml-1">(comprimides automàticament)</span>
+            </label>
+            <div class="flex items-center gap-2 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 text-xs text-amber-800">
+                <i data-lucide="image" class="w-3 h-3 shrink-0"></i>
+                <label for="quality-select" class="font-semibold shrink-0">Qualitat:</label>
+               <select id="quality-select" class="bg-transparent outline-none font-medium text-amber-900 flex-1">
+                 <option value="0.3">Mínima (~80 KB)</option>
+                 <option value="0.5">Lleugera (~150 KB)</option>
+                 <option value="0.7" selected>Normal (~300 KB)</option>
+                 <option value="0.85">Alta (~600 KB)</option>
+                 <option value="1.0">Màxima (sense pèrdua)</option>
+               </select> 
+                <span id="quality-size-hint" class="text-amber-600 shrink-0">~300 KB</span>
+            </div>
+            <div class="flex gap-2 mt-1">
+                <label class="flex-1 border-2 border-dashed border-blue-300 bg-blue-50 text-blue-700 font-semibold py-3 px-2 rounded-lg flex flex-col items-center justify-center gap-1 cursor-pointer hover:bg-blue-100 transition">
+                    <i data-lucide="camera" class="w-6 h-6"></i>
+                    <span class="text-sm">Càmera</span>
+                    <input type="file" accept="image/*" capture="environment" class="hidden" onchange="handlePhoto(event)" onclick="suspendMap()">
+                </label>
+                <label class="flex-1 border-2 border-dashed border-purple-300 bg-purple-50 text-purple-700 font-semibold py-3 px-2 rounded-lg flex flex-col items-center justify-center gap-1 cursor-pointer hover:bg-purple-100 transition">
+                    <i data-lucide="image" class="w-6 h-6"></i>
+                    <span class="text-sm">Galeria</span>
+                    <input type="file" accept="image/*" multiple class="hidden" onchange="handlePhoto(event)" onclick="suspendMap()">
+                </label>
+            </div>
+            <div id="photo-status" class="text-center text-xs text-gray-500 font-medium mt-1">Sense fotos noves</div>
+            <div id="photo-preview-container" class="hidden mt-2 grid grid-cols-2 gap-2"></div>
+        </div>
+
+        <button onclick="savePoint()" class="w-full bg-blue-600 text-white py-4 mt-2 rounded-xl font-bold flex items-center justify-center gap-2 hover:bg-blue-700 transition shadow-md">
+            <i data-lucide="save"></i> <span id="btn-save-text">Guardar Punt al Mapa</span>
+        </button>
+    </div>
+</div>
+
+<div id="tools-panel" class="fixed inset-x-0 bottom-0 z-[600] bg-white rounded-t-3xl shadow-2xl transform translate-y-full transition-transform duration-300 max-h-[85vh] flex flex-col">
+    <div class="p-5 border-b flex justify-between items-center sticky top-0 bg-white rounded-t-3xl z-10">
+        <h1 class="text-xl font-bold text-gray-800 flex items-center gap-2">
+            <i data-lucide="database" class="text-gray-500"></i> Gestió de Dades
+        </h1>
+        <button onclick="closeAllPanels()" class="text-gray-500 hover:bg-gray-100 p-2 rounded-full"><i data-lucide="x"></i></button>
+    </div>
+    <div class="p-5 overflow-y-auto flex flex-col gap-3">
+        <div class="text-center font-semibold text-gray-700 bg-gray-50 border border-gray-200 rounded-lg p-3">
+            Punts emmagatzemats: <span id="points-count" class="text-blue-600 text-xl font-bold">0</span>
+        </div>
+        
+        <div class="flex flex-col gap-2 bg-white border border-gray-200 rounded-lg p-3 shadow-sm">
+            <label for="layer-name-input" class="text-sm font-semibold text-gray-700">Nom de la capa (prefix arxius/carpeta):</label>
+            <input type="text" id="layer-name-input" onchange="updateLayerName(this.value)" class="border border-gray-300 rounded-md p-2 outline-none focus:ring-2 focus:ring-blue-500">
+        </div>
+
+        <div class="flex items-center justify-between bg-white border border-gray-200 rounded-lg p-3 shadow-sm">
+            <label for="custom-start-num" class="text-sm font-semibold text-gray-700">Començar numeració pel punt:</label>
+            <input type="number" id="custom-start-num" min="1" onchange="updateCustomStartNum(this.value)" class="w-16 border border-gray-300 rounded-md p-1.5 text-center font-bold text-blue-600 outline-none">
+        </div>
+
+        <div class="h-px bg-gray-100 my-2"></div>
+        <div class="bg-blue-50 border border-blue-200 rounded-lg p-3 shadow-sm">
+            <h3 class="font-bold text-blue-800 text-sm mb-2 flex items-center gap-1">
+                <i data-lucide="list-plus" class="w-4 h-4"></i> Camps del Formulari
+            </h3>
+            <p class="text-xs text-blue-600 mb-3">Tots els camps del formulari. Afegeix, edita o elimina com vulguis.</p>
+            
+            <div id="custom-fields-admin-list" class="flex flex-col gap-2 mb-3"></div>
+            
+            <div class="flex gap-2">
+                <input type="text" id="new-cf-name" placeholder="Nom del camp nou" class="flex-1 border border-gray-300 rounded-md p-2 outline-none text-sm focus:ring-2 focus:ring-blue-500">
+                <select id="new-cf-type" onchange="handleCfTypeChange(this)" class="border border-gray-300 rounded-md p-2 text-sm outline-none focus:ring-2 focus:ring-blue-500 bg-white">
+                    <option value="text">Text curt</option>
+                    <option value="number">Número</option>
+                    <option value="textarea">Text llarg (amb veu)</option>
+                    <option value="select">Desplegable</option>
+                </select>
+                <button onclick="addCustomField()" class="bg-blue-600 text-white px-3 py-2 rounded-md hover:bg-blue-700 transition">
+                    <i data-lucide="plus" class="w-4 h-4"></i>
+                </button>
+            </div>
+            <input type="text" id="new-cf-options" class="hidden mt-2 w-full border border-gray-300 rounded-md p-2 outline-none text-sm focus:ring-2 focus:ring-blue-500" placeholder="Opcions separades per coma (ex: Bo,Regular,Dolent)">
+        </div>
+
+        <div class="h-px bg-gray-100 my-2"></div>
+        <button onclick="exportDataAsZip()" class="w-full bg-green-600 text-white py-3 rounded-lg font-bold flex items-center justify-center gap-2 shadow-sm">
+            <i data-lucide="folder-down"></i> Exportar ZIP (GeoJSON + Fotos)
+        </button>
+        <button onclick="exportGeoJSONonly()" class="w-full bg-teal-600 text-white py-3 rounded-lg font-bold flex items-center justify-center gap-2 shadow-sm mt-2">
+            <i data-lucide="file-down"></i> Exportar GeoJSON directe
+        </button>
+        <button onclick="exportHtmlReport()" class="w-full bg-pink-600 text-white py-3 rounded-lg font-bold flex items-center justify-center gap-2 shadow-sm mt-2">
+            <i data-lucide="image"></i> Exportar Informe HTML (amb fotos)
+        </button>
+        <button onclick="document.getElementById('import-file').click()" class="w-full bg-indigo-50 text-indigo-600 py-3 rounded-lg font-semibold flex items-center justify-center gap-2 border border-indigo-200 mt-2">
+            <i data-lucide="folder-up"></i> Importar ZIP / GeoJSON
+        </button>
+        <button onclick="exportDiagnosticZip()" class="w-full bg-purple-50 text-purple-700 py-3 rounded-lg font-semibold flex items-center justify-center gap-2 border border-purple-200 mt-2">
+            <i data-lucide="bug"></i> Descarregar diagnòstic d'errors
+        </button>
+
+        <button onclick="cleanCache()" class="w-full bg-orange-50 text-orange-600 py-3 rounded-lg font-semibold flex items-center justify-center gap-2 border border-orange-200 mt-2">
+            <i data-lucide="cpu"></i> Netejar memòria cau (Caché)
+        </button>
+
+        <div class="h-px bg-gray-100 my-2"></div>
+        
+        <button onclick="clearData()" class="w-full bg-red-50 text-red-600 py-3 rounded-lg font-semibold flex items-center justify-center gap-2 border border-red-200 mt-4">
+            <i data-lucide="trash-2"></i> Esborrar totes les dades
+        </button>
+        
+        <input type="file" id="import-file" accept=".zip,.geojson,application/geo+json,application/zip,image/jpeg,image/png" multiple class="hidden" onchange="importData(event)">
+  
+    </div>
+</div>
+
+<div id="photo-viewer-modal" class="fixed inset-0 z-[800] hidden items-center justify-center bg-black/90">
+    <button onclick="closePhotoViewer()" class="absolute top-4 right-4 text-white bg-black/50 rounded-full p-2 z-10">
+        <i data-lucide="x" class="w-6 h-6"></i>
+    </button>
+    <div id="photo-viewer-hint" class="absolute bottom-6 left-1/2 -translate-x-1/2 text-white/60 text-xs z-10 pointer-events-none">
+        Pinça o scroll per fer zoom · Doble clic per resetar
+    </div>
+    <div id="photo-viewer-container" style="overflow:hidden;width:100%;height:100%;display:flex;align-items:center;justify-content:center;cursor:grab;">
+        <img id="photo-viewer-img" src="" style="max-width:100%;max-height:90vh;border-radius:8px;object-contain;transform-origin:center center;transition:transform 0.1s ease;user-select:none;pointer-events:none;">
+    </div>
+</div>
+
+<script>
 lucide.createIcons();
 
 document.getElementById('quality-select').addEventListener('change', function () {
