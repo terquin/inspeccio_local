@@ -1103,6 +1103,7 @@ async function handlePhoto(event) {
 
 
 // ── GUARDAR PUNT ──────────────────────────────────────────────
+
 async function savePoint() {
     _memMark('savePoint:inici');
     if (currentLat === null) { showNotification('⚠️ GPS no disponible', true); return; }
@@ -1143,7 +1144,10 @@ async function savePoint() {
     if (!isEdit) savedPoints.push(f);
     _memMark('savePoint:abans-localStorage');
     localStorage.setItem('inspeccions_qgis', JSON.stringify(savedPoints));
-    _memMark('savePoint:abans-upsertMarker');
+    
+    // CORREGIT: Un sol guió baix
+    _memMark('savePoint:abans-upsertMarker'); 
+    
     upsertMarker(f);
     closeAllPanels();
     showNotification(`✅ Punt #${f.properties.FID} desat!`);
@@ -1665,7 +1669,8 @@ function sanitizeFieldKey(label) {
 async function exportHtmlReport() {
     if (!savedPoints.length) { showNotification('⚠️ No hi ha punts per exportar', true); return; }
     showNotification('⏳ Generant informe HTML (pot trigar si hi ha moltes fotos)...');
-fdg
+
+    // CORREGIT: Esborrades les lletres "fdg" que hi havia aquí
     const sorted = [...savedPoints].sort((a, b) => (a.properties.FID || 0) - (b.properties.FID || 0));
     let cardsHtml = '';
 
