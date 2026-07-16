@@ -1825,7 +1825,7 @@ async function importData(event) {
             let geojsonFile = null;
             zip.forEach((relativePath, zipEntry) => {
                 // Ignorem carpetes Mac i arxius ocults
-                const isHidden = relativePath.includes('__MACOSX') || relativePath.split('/').pop().startsWith('._');
+                const isHidden = relativePath.includes('__MACOSX') || relativePath.split(/[/\\]/).pop().startsWith('._');
                 if (relativePath.toLowerCase().endsWith('.geojson') && !isHidden) {
                     geojsonFile = zipEntry;
                 }
@@ -1842,49 +1842,64 @@ async function importData(event) {
             let fotosCount = 0;
 
             for (let f of data.features) {
-                if (f.properties && f.properties.num_punt !== undefined) {
-                    f.properties.FID = f.properties.num_punt;
-                    delete f.properties.num_punt;
-                }
+                try {
+                    // SEGURETAT 1: Comprovem que existeixen properties
+                    if (!f.properties) f.properties = {};
+                    if (f.properties.num_punt !== undefined) {
+                        f.properties.FID = f.properties.num_punt;
+                        delete f.properties.num_punt;
+                    }
 
-                const [x, y] = f.geometry.coordinates;
-                const wgs84 = utm31ToWgs84(x, y);
-                f.geometry.coordinates = [wgs84.lon, wgs84.lat];
-                
-                f.id = Date.now().toString() + Math.floor(Math.random() * 10000);
-                if (!f.properties.local_keys) f.properties.local_keys = [];
+                    // SEGURETAT 2: Saltem els punts que no tinguin geometria (exportacions fallides del QGIS)
+                    if (!f.geometry || !f.geometry.coordinates) {
+                        console.warn('S\'ha saltat un punt sense coordenades:', f);
+                        continue; 
+                    }
 
-                const propKeys = Object.keys(f.properties);
-                for (let pk of propKeys) {
-                    if (pk.startsWith('foto_url_')) {
-                        const photoPath = f.properties[pk];
-                        
-                        // CORRECCIÓ: Comprovem que photoPath existeix i és un text abans de fer l'split
-                        if (photoPath && typeof photoPath === 'string') {
-                            const fileName = photoPath.split('/').pop();
+                    const [x, y] = f.geometry.coordinates;
+                    const wgs84 = utm31ToWgs84(x, y);
+                    f.geometry.coordinates = [wgs84.lon, wgs84.lat];
+                    
+                    f.id = Date.now().toString() + Math.floor(Math.random() * 10000);
+                    if (!f.properties.local_keys) f.properties.local_keys = [];
 
-                            let zipPhoto = null;
-                            zip.forEach((relPath, entry) => {
-                                const isHidden = relPath.includes('__MACOSX') || relPath.split('/').pop().startsWith('._');
-                                if (relPath.endsWith(fileName) && !isHidden) {
-                                    zipPhoto = entry;
+                    const propKeys = Object.keys(f.properties);
+                    for (let pk of propKeys) {
+                        if (pk.startsWith('foto_url_')) {
+                            const photoPath = f.properties[pk];
+                            
+                            // SEGURETAT 3: Ens assegurem que hi ha text abans d'operar
+                            if (photoPath && typeof photoPath === 'string') {
+                                // Normalitzem les barres invertides (\) de Windows a (/)
+                                const cleanPath = photoPath.replace(/\\/g, '/');
+                                const fileName = cleanPath.split('/').pop();
+
+                                let zipPhoto = null;
+                                zip.forEach((relPath, entry) => {
+                                    const isHidden = relPath.includes('__MACOSX') || relPath.split(/[/\\]/).pop().startsWith('._');
+                                    const cleanRelPath = relPath.replace(/\\/g, '/');
+                                    if (cleanRelPath.endsWith(fileName) && !isHidden) {
+                                        zipPhoto = entry;
+                                    }
+                                });
+
+                                if (zipPhoto) {
+                                    const photoBlob = await zipPhoto.async("blob");
+                                    const dbKey = `import_${f.id}_${pk}`;
+                                    await saveBlobToDB(dbKey, photoBlob);
+                                    f.properties.local_keys.push(dbKey);
+                                    fotosCount++;
                                 }
-                            });
-
-                            if (zipPhoto) {
-                                const photoBlob = await zipPhoto.async("blob");
-                                const dbKey = `import_${f.id}_${pk}`;
-                                await saveBlobToDB(dbKey, photoBlob);
-                                f.properties.local_keys.push(dbKey);
-                                fotosCount++;
                             }
                         }
                     }
-                }
 
-                f.properties.n_fotos = f.properties.local_keys.length;
-                savedPoints.push(f);
-                importedCount++;
+                    f.properties.n_fotos = f.properties.local_keys.length;
+                    savedPoints.push(f);
+                    importedCount++;
+                } catch (featureErr) {
+                    console.error("Error processant un punt concret (s'ha omès):", featureErr, f);
+                }
             }
 
             localStorage.setItem('inspeccions_qgis', JSON.stringify(savedPoints));
@@ -1893,14 +1908,14 @@ async function importData(event) {
             showNotification(`✅ ${importedCount} punts i ${fotosCount} fotos importats des del ZIP!`);
         } catch(err) {
             console.error(err);
-            showNotification('❌ Error important el ZIP', true);
+            // Mostrem l'error EXACTE per pantalla
+            showNotification('❌ Error ZIP: ' + (err.message || 'Desconegut'), true);
         }
     } 
     // CAS 2: L'usuari ha pujat múltiples arxius (GeoJSON + Fotos) o un GeoJSON sol
     else {
         showNotification('⏳ Processant arxius...');
         
-        // Busquem quin dels arxius és el GeoJSON i quins són imatges
         const geojsonFile = files.find(f => f.name.toLowerCase().endsWith('.geojson') || f.name.toLowerCase().endsWith('.json'));
         const imageFiles = files.filter(f => f.type.startsWith('image/'));
 
@@ -1914,49 +1929,62 @@ async function importData(event) {
         reader.onload = async (e) => {
             try {
                 const data = JSON.parse(e.target.result);
-                if (data.type !== 'FeatureCollection' || !data.features) throw new Error('Format no vàlid');
+                if (data.type !== 'FeatureCollection' || !data.features) throw new Error('No és un GeoJSON vàlid');
                 detectAndAdaptFields(data.features);
                 
                 let importedCount = 0;
                 let fotosCount = 0;
 
                 for (let f of data.features) {
-                    if (f.properties && f.properties.num_punt !== undefined) {
-                        f.properties.FID = f.properties.num_punt;
-                        delete f.properties.num_punt;
-                    }
-                    const [x, y] = f.geometry.coordinates;
-                    const wgs84 = utm31ToWgs84(x, y);
-                    f.geometry.coordinates = [wgs84.lon, wgs84.lat];
-                    if (!f.properties.local_keys) f.properties.local_keys = [];
-                    f.id = Date.now().toString() + Math.floor(Math.random() * 1000);
+                    try {
+                        // SEGURETAT 1: Comprovem que existeixen properties
+                        if (!f.properties) f.properties = {};
+                        if (f.properties.num_punt !== undefined) {
+                            f.properties.FID = f.properties.num_punt;
+                            delete f.properties.num_punt;
+                        }
 
-                    // Emparellem les fotos pujades amb les que demana el GeoJSON
-                    const propKeys = Object.keys(f.properties);
-                    for (let pk of propKeys) {
-                        if (pk.startsWith('foto_url_')) {
-                            const photoPath = f.properties[pk];
-                            
-                            // CORRECCIÓ: Comprovem que photoPath existeix i és un text abans de fer l'split
-                            if (photoPath && typeof photoPath === 'string') {
-                                const fileName = photoPath.split('/').pop();
+                        // SEGURETAT 2: Saltem els punts que no tinguin geometria
+                        if (!f.geometry || !f.geometry.coordinates) {
+                            console.warn('S\'ha saltat un punt sense coordenades:', f);
+                            continue;
+                        }
 
-                                // Busquem si entre els arxius pujats n'hi ha un amb aquest nom
-                                const matchingImage = imageFiles.find(img => img.name === fileName);
+                        const [x, y] = f.geometry.coordinates;
+                        const wgs84 = utm31ToWgs84(x, y);
+                        f.geometry.coordinates = [wgs84.lon, wgs84.lat];
+                        if (!f.properties.local_keys) f.properties.local_keys = [];
+                        f.id = Date.now().toString() + Math.floor(Math.random() * 10000);
 
-                                if (matchingImage) {
-                                    const dbKey = `import_${f.id}_${pk}`;
-                                    await saveBlobToDB(dbKey, matchingImage);
-                                    f.properties.local_keys.push(dbKey);
-                                    fotosCount++;
+                        const propKeys = Object.keys(f.properties);
+                        for (let pk of propKeys) {
+                            if (pk.startsWith('foto_url_')) {
+                                const photoPath = f.properties[pk];
+                                
+                                // SEGURETAT 3: Ens assegurem que hi ha text abans d'operar
+                                if (photoPath && typeof photoPath === 'string') {
+                                    // Normalitzem les barres invertides (\) de Windows a (/)
+                                    const cleanPath = photoPath.replace(/\\/g, '/');
+                                    const fileName = cleanPath.split('/').pop();
+
+                                    const matchingImage = imageFiles.find(img => img.name === fileName);
+
+                                    if (matchingImage) {
+                                        const dbKey = `import_${f.id}_${pk}`;
+                                        await saveBlobToDB(dbKey, matchingImage);
+                                        f.properties.local_keys.push(dbKey);
+                                        fotosCount++;
+                                    }
                                 }
                             }
                         }
-                    }
 
-                    f.properties.n_fotos = f.properties.local_keys.length;
-                    savedPoints.push(f);
-                    importedCount++;
+                        f.properties.n_fotos = f.properties.local_keys.length;
+                        savedPoints.push(f);
+                        importedCount++;
+                    } catch (featureErr) {
+                        console.error("Error processant un punt concret (s'ha omès):", featureErr, f);
+                    }
                 }
                 
                 localStorage.setItem('inspeccions_qgis', JSON.stringify(savedPoints));
@@ -1964,8 +1992,9 @@ async function importData(event) {
                 closeAllPanels();
                 showNotification(`✅ ${importedCount} punts i ${fotosCount} fotos importats amb èxit!`);
             } catch (err) {
-                showNotification('❌ Error al llegir el GeoJSON', true);
                 console.error(err);
+                // Mostrem l'error EXACTE per pantalla
+                showNotification('❌ Error llegint JSON: ' + (err.message || 'Desconegut'), true);
             }
         };
         reader.readAsText(geojsonFile);
@@ -1973,7 +2002,6 @@ async function importData(event) {
     
     event.target.value = '';
 }
-
 // ── ESBORRAR DADES ────────────────────────────────────────────
 function clearData() {
     if (!confirm('Segur? S\'esborraran tots els punts i fotos locals.')) return;
