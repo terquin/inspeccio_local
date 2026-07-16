@@ -1657,12 +1657,23 @@ function resizeBlobForReport(blob, maxDim, quality) {
     });
 }
 
+function sanitizeFieldKey(label) {
+    return label.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+        .replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '') || 'camp';
+}
+
 async function exportHtmlReport() {
     if (!savedPoints.length) { showNotification('⚠️ No hi ha punts per exportar', true); return; }
     showNotification('⏳ Generant informe HTML (pot trigar si hi ha moltes fotos)...');
 
     const sorted = [...savedPoints].sort((a, b) => (a.properties.FID || 0) - (b.properties.FID || 0));
     let cardsHtml = '';
+
+    let fieldTogglesHtml = '';
+    customFields.forEach(cf => {
+        const fieldKey = sanitizeFieldKey(cf.label);
+        fieldTogglesHtml += `<label class="field-toggle"><input type="checkbox" checked onchange="toggleField('${fieldKey}', this.checked)"> ${cf.label}</label>`;
+    });
 
     for (const f of sorted) {
         const props = f.properties;
@@ -1686,7 +1697,8 @@ async function exportHtmlReport() {
                 if (cf.id === 'cf_notes') val = props.notes || '';
             }
             if (val !== null && val !== '') {
-                fieldsHtml += `<tr><td class="field-label">${cf.label}</td><td>${val}</td></tr>`;
+                const fieldKey = sanitizeFieldKey(cf.label);
+                fieldsHtml += `<tr data-field="${fieldKey}"><td class="field-label">${cf.label}</td><td class="field-value" contenteditable="true">${val}</td></tr>`;
             }
         });
 
@@ -1698,7 +1710,7 @@ async function exportHtmlReport() {
                 if (!blob) continue;
                 const smallBlob = await resizeBlobForReport(blob, 700, 0.6);
                 const dataUrl = await blobToDataUrl(smallBlob);
-                photosHtml += `<img class="report-photo" src="${dataUrl}" alt="Foto punt ${props.FID}">`;
+                photosHtml += `<div class="photo-wrap"><button class="photo-del no-print" onclick="this.parentElement.remove()" title="Eliminar foto de l'informe">×</button><img class="report-photo" src="${dataUrl}" alt="Foto punt ${props.FID}"></div>`;
             } catch (err) {
                 console.warn('No s\'ha pogut afegir una foto a l\'informe:', err);
             }
@@ -1715,6 +1727,96 @@ async function exportHtmlReport() {
             ${photosHtml ? `<div class="photos-grid">${photosHtml}</div>` : '<p class="no-photos">Sense fotos</p>'}
         </div>`;
     }
+
+    const now = new Date();
+    const dateStr = now.toLocaleDateString('ca-ES', { year: 'numeric', month: 'long', day: 'numeric' });
+
+    const fullHtml = `<!DOCTYPE html>
+<html lang="ca">
+<head>
+<meta charset="UTF-8">
+<title>Informe ${layerName}</title>
+<style>
+    body { font-family: -apple-system, Segoe UI, Roboto, Arial, sans-serif; background:#f3f4f6; margin:0; padding:20px; color:#1f2937; }
+    .control-bar {
+        position: sticky; top:0; background:white; border-bottom:2px solid #e5e7eb;
+        padding:12px 16px; margin:-20px -20px 20px; z-index:100;
+        box-shadow:0 2px 6px rgba(0,0,0,.08);
+    }
+    .control-bar h2 { margin:0 0 8px; font-size:14px; color:#374151; }
+    .field-toggles { display:flex; flex-wrap:wrap; gap:10px 16px; margin-bottom:10px; }
+    .field-toggle { font-size:12px; display:flex; align-items:center; gap:4px; cursor:pointer; user-select:none; }
+    .print-btn { background:#2563eb; color:white; border:none; padding:8px 16px; border-radius:6px; font-weight:bold; cursor:pointer; font-size:13px; }
+    .control-hint { font-size:11px; color:#9ca3af; margin-top:6px; max-width:700px; }
+    .report-header { text-align:center; margin-bottom:24px; }
+    .report-header h1 { margin:0 0 4px; font-size:22px; }
+    .report-header p { margin:0; color:#6b7280; font-size:13px; }
+    .point-card {
+        background:white; border-left:6px solid #9ca3af; border-radius:8px;
+        box-shadow:0 1px 3px rgba(0,0,0,.1); padding:16px; margin-bottom:16px;
+        page-break-inside: avoid;
+    }
+    .point-header { display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin-bottom:10px; }
+    .point-id { font-family:monospace; background:#eff6ff; color:#1d4ed8; border:1px solid #bfdbfe; border-radius:4px; padding:3px 8px; font-weight:bold; }
+    .badge-blue { background:#3b82f6; color:white; padding:3px 8px; border-radius:4px; font-size:11px; font-weight:bold; }
+    .point-coords { margin-left:auto; font-family:monospace; font-size:12px; color:#6b7280; }
+    .fields-table { width:100%; border-collapse:collapse; font-size:13px; margin-bottom:10px; }
+    .fields-table td { padding:4px 6px; border-bottom:1px solid #f3f4f6; vertical-align:top; }
+    .field-label { font-weight:bold; color:#374151; width:35%; white-space:nowrap; }
+    .field-value[contenteditable="true"] { border-radius:3px; cursor:text; }
+    .field-value[contenteditable="true"]:hover { background:#f9fafb; }
+    .field-value[contenteditable="true"]:focus { background:#eff6ff; outline:1px dashed #93c5fd; }
+    .photos-grid { display:flex; flex-wrap:wrap; gap:8px; }
+    .photo-wrap { position:relative; display:inline-block; }
+    .photo-del {
+        position:absolute; top:-6px; right:-6px; background:#ef4444; color:white;
+        border:2px solid white; border-radius:50%; width:22px; height:22px;
+        font-size:14px; line-height:1; cursor:pointer; box-shadow:0 1px 3px rgba(0,0,0,.3);
+    }
+    .report-photo { width:180px; height:180px; object-fit:cover; border-radius:6px; border:1px solid #e5e7eb; }
+    .no-photos { color:#9ca3af; font-size:12px; font-style:italic; margin:0; }
+    @media print {
+        body { background:white; padding:0; }
+        .control-bar, .no-print { display:none !important; }
+        .point-card { box-shadow:none; border:1px solid #e5e7eb; border-left-width:6px; }
+    }
+</style>
+</head>
+<body>
+    <div class="control-bar no-print">
+        <h2>🔧 Personalitza l'informe (només en aquesta finestra)</h2>
+        <div class="field-toggles">${fieldTogglesHtml}</div>
+        <button class="print-btn" onclick="window.print()">🖨️ Imprimeix / Desa com a PDF</button>
+        <p class="control-hint">Clica qualsevol text per editar-lo, amaga camps amb les caselles, i elimina fotos amb la ×. Els canvis només existeixen en aquesta pestanya: imprimeix a PDF per conservar-los, o fes servir "Desar pàgina com..." del navegador.</p>
+    </div>
+    <div class="report-header">
+        <h1>Informe d'Inspecció — ${layerName}</h1>
+        <p>Generat el ${dateStr} · ${sorted.length} punts</p>
+    </div>
+    ${cardsHtml}
+    <script>
+        function toggleField(key, show) {
+            document.querySelectorAll('[data-field="' + key + '"]').forEach(el => {
+                el.style.display = show ? '' : 'none';
+            });
+        }
+    </script>
+</body>
+</html>`;
+
+    try {
+        const blob = new Blob([fullHtml], { type: 'text/html' });
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = `${layerName}_informe_${Date.now()}.html`;
+        a.click();
+        setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+        showNotification('✅ Informe HTML descarregat!');
+    } catch (err) {
+        showNotification('❌ Error generant l\'informe', true);
+        console.error(err);
+    }
+}
 
     const now = new Date();
     const dateStr = now.toLocaleDateString('ca-ES', { year: 'numeric', month: 'long', day: 'numeric' });
