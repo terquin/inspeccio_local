@@ -1665,7 +1665,7 @@ function sanitizeFieldKey(label) {
 async function exportHtmlReport() {
     if (!savedPoints.length) { showNotification('⚠️ No hi ha punts per exportar', true); return; }
     showNotification('⏳ Generant informe HTML (pot trigar si hi ha moltes fotos)...');
-
+fdg
     const sorted = [...savedPoints].sort((a, b) => (a.properties.FID || 0) - (b.properties.FID || 0));
     let cardsHtml = '';
 
@@ -1859,6 +1859,7 @@ function detectAndAdaptFields(features) {
 }
     
 // ── IMPORTAR ZIP / GEOJSON O ARXIUS SOLTS ──────────────────────────
+// ── IMPORTAR ZIP / GEOJSON O ARXIUS SOLTS ──────────────────────────
 async function importData(event) {
     const files = Array.from(event.target.files);
     if (files.length === 0) return;
@@ -1897,7 +1898,7 @@ async function importData(event) {
                         delete f.properties.num_punt;
                     }
 
-                    // SEGURETAT 2: Saltem els punts que no tinguin geometria (exportacions fallides del QGIS)
+                    // SEGURETAT 2: Saltem els punts que no tinguin geometria (evita penjades greus)
                     if (!f.geometry || !f.geometry.coordinates) {
                         console.warn('S\'ha saltat un punt sense coordenades:', f);
                         continue; 
@@ -1915,7 +1916,7 @@ async function importData(event) {
                         if (pk.startsWith('foto_url_')) {
                             const photoPath = f.properties[pk];
                             
-                            // SEGURETAT 3: Ens assegurem que hi ha text abans d'operar
+                            // SEGURETAT 3: Ens assegurem que hi ha text i no és null abans d'operar
                             if (photoPath && typeof photoPath === 'string') {
                                 // Normalitzem les barres invertides (\) de Windows a (/)
                                 const cleanPath = photoPath.replace(/\\/g, '/');
@@ -1955,7 +1956,6 @@ async function importData(event) {
             showNotification(`✅ ${importedCount} punts i ${fotosCount} fotos importats des del ZIP!`);
         } catch(err) {
             console.error(err);
-            // Mostrem l'error EXACTE per pantalla
             showNotification('❌ Error ZIP: ' + (err.message || 'Desconegut'), true);
         }
     } 
@@ -1984,14 +1984,12 @@ async function importData(event) {
 
                 for (let f of data.features) {
                     try {
-                        // SEGURETAT 1: Comprovem que existeixen properties
                         if (!f.properties) f.properties = {};
                         if (f.properties.num_punt !== undefined) {
                             f.properties.FID = f.properties.num_punt;
                             delete f.properties.num_punt;
                         }
 
-                        // SEGURETAT 2: Saltem els punts que no tinguin geometria
                         if (!f.geometry || !f.geometry.coordinates) {
                             console.warn('S\'ha saltat un punt sense coordenades:', f);
                             continue;
@@ -2008,9 +2006,7 @@ async function importData(event) {
                             if (pk.startsWith('foto_url_')) {
                                 const photoPath = f.properties[pk];
                                 
-                                // SEGURETAT 3: Ens assegurem que hi ha text abans d'operar
                                 if (photoPath && typeof photoPath === 'string') {
-                                    // Normalitzem les barres invertides (\) de Windows a (/)
                                     const cleanPath = photoPath.replace(/\\/g, '/');
                                     const fileName = cleanPath.split('/').pop();
 
@@ -2040,7 +2036,6 @@ async function importData(event) {
                 showNotification(`✅ ${importedCount} punts i ${fotosCount} fotos importats amb èxit!`);
             } catch (err) {
                 console.error(err);
-                // Mostrem l'error EXACTE per pantalla
                 showNotification('❌ Error llegint JSON: ' + (err.message || 'Desconegut'), true);
             }
         };
@@ -2049,14 +2044,13 @@ async function importData(event) {
     
     event.target.value = '';
 }
+
 // ── ESBORRAR DADES ────────────────────────────────────────────
 function clearData() {
     if (!confirm('Segur? S\'esborraran tots els punts i fotos locals.')) return;
     localStorage.removeItem('inspeccions_qgis');
     location.reload();
 }
-
-// ── INICIALITZACIÓ ────────────────────────────────────────────
 
 // ── DETECCIÓ DE PENJADES ANTERIORS ────────────────────────────
 function checkForCrash() {
@@ -2097,7 +2091,6 @@ document.addEventListener('visibilitychange', async () => {
         try { await initDB(); } catch (e) { console.warn('Reinici DB fallit:', e); }
     }
 });
-
 </script>
 
 </body>
