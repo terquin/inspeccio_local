@@ -1834,11 +1834,11 @@ async function exportHtmlReport() {
                     const dataUrl = await resizeImageFile(file, 700, 0.6);
                     const wrap = document.createElement('div');
                     wrap.className = 'photo-wrap';
-                    wrap.innerHTML = '<button class="photo-del no-print" onclick="this.parentElement.remove()" title="Eliminar foto de l\'informe">×</button>' +
+                    wrap.innerHTML = '<button class="photo-del no-print" onclick="this.parentElement.remove()" title="Eliminar foto de l\\'informe">×</button>' +
                         '<img class="report-photo" src="' + dataUrl + '" alt="Foto afegida">';
                     grid.appendChild(wrap);
                 } catch (err) {
-                    console.warn('No s\'ha pogut afegir la foto:', err);
+                    console.warn('No s\\'ha pogut afegir la foto:', err);
                 }
             }
         }
@@ -1846,7 +1846,7 @@ async function exportHtmlReport() {
         function saveEditedCopy() {
             // Clonem la pàgina TAL COM ESTÀ ARA (punts amagats, fotos
             // eliminades, text editat...) i la baixem com un HTML nou.
-            const html = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
+            const html = '<!DOCTYPE html>\\n' + document.documentElement.outerHTML;
             const blob = new Blob([html], { type: 'text/html' });
             const a = document.createElement('a');
             a.href = URL.createObjectURL(blob);
