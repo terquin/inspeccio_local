@@ -1685,9 +1685,15 @@ async function exportHtmlReport() {
                 ${props.revisat ? '<span class="badge-blue">REVISAT</span>' : ''}
                 <a class="gmaps-link" href="${gmapsUrl}" target="_blank" rel="noopener">📍 Google Maps</a>
                 <span class="point-coords">X: ${utm.x.toFixed(2)} m &nbsp; Y: ${utm.y.toFixed(2)} m</span>
-            </div>
             ${fieldsHtml ? `<table class="fields-table">${fieldsHtml}</table>` : ''}
-            ${photosHtml ? `<div class="photos-grid">${photosHtml}</div>` : '<p class="no-photos">Sense fotos</p>'}
+            <div class="photos-grid" id="photos-grid-${f.id}">
+                ${photosHtml}
+                ${photosHtml ? '' : '<p class="no-photos">Sense fotos</p>'}
+            </div>
+            <label class="add-photo-btn no-print">
+                ➕ Afegeix foto
+                <input type="file" accept="image/*" multiple style="display:none" onchange="addPhotosToCard('${f.id}', this.files)">
+            </label>
         </div>`;
     }
 
@@ -1755,6 +1761,12 @@ async function exportHtmlReport() {
     }
     .report-photo { width:180px; height:180px; object-fit:cover; border-radius:6px; border:1px solid #e5e7eb; }
     .no-photos { color:#9ca3af; font-size:12px; font-style:italic; margin:0; }
+    .add-photo-btn {
+        display:inline-block; margin-top:8px; padding:6px 12px;
+        border:2px dashed #a78bfa; color:#7c3aed; border-radius:6px;
+        font-size:12px; font-weight:bold; cursor:pointer; background:#f5f3ff;
+    }
+    .add-photo-btn:hover { background:#ede9fe; }
     @media print {
         body { background:white; padding:0; }
         .control-bar, .no-print { display:none !important; }
@@ -1783,6 +1795,51 @@ async function exportHtmlReport() {
             document.querySelectorAll('[data-field="' + key + '"]').forEach(el => {
                 el.style.display = show ? '' : 'none';
             });
+        }
+
+        function resizeImageFile(file, maxDim, quality) {
+            return new Promise((resolve, reject) => {
+                const reader = new FileReader();
+                reader.onload = function(e) {
+                    const img = new Image();
+                    img.onload = function() {
+                        let width = img.width, height = img.height;
+                        if (width > maxDim || height > maxDim) {
+                            if (width > height) { height = Math.round(height * maxDim / width); width = maxDim; }
+                            else { width = Math.round(width * maxDim / height); height = maxDim; }
+                        }
+                        const canvas = document.createElement('canvas');
+                        canvas.width = width; canvas.height = height;
+                        const ctx = canvas.getContext('2d');
+                        ctx.drawImage(img, 0, 0, width, height);
+                        resolve(canvas.toDataURL('image/jpeg', quality));
+                    };
+                    img.onerror = function() { reject(new Error('No es pot llegir la imatge')); };
+                    img.src = e.target.result;
+                };
+                reader.onerror = function() { reject(new Error('No es pot llegir el fitxer')); };
+                reader.readAsDataURL(file);
+            });
+        }
+
+        async function addPhotosToCard(pointId, fileList) {
+            const grid = document.getElementById('photos-grid-' + pointId);
+            if (!grid) return;
+            const noPhotosMsg = grid.querySelector('.no-photos');
+            if (noPhotosMsg) noPhotosMsg.remove();
+
+            for (const file of fileList) {
+                try {
+                    const dataUrl = await resizeImageFile(file, 700, 0.6);
+                    const wrap = document.createElement('div');
+                    wrap.className = 'photo-wrap';
+                    wrap.innerHTML = '<button class="photo-del no-print" onclick="this.parentElement.remove()" title="Eliminar foto de l\'informe">×</button>' +
+                        '<img class="report-photo" src="' + dataUrl + '" alt="Foto afegida">';
+                    grid.appendChild(wrap);
+                } catch (err) {
+                    console.warn('No s\'ha pogut afegir la foto:', err);
+                }
+            }
         }
 
         function saveEditedCopy() {
