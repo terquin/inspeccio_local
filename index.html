@@ -1685,6 +1685,7 @@ async function exportHtmlReport() {
                 ${props.revisat ? '<span class="badge-blue">REVISAT</span>' : ''}
                 <a class="gmaps-link" href="${gmapsUrl}" target="_blank" rel="noopener">📍 Google Maps</a>
                 <span class="point-coords">X: ${utm.x.toFixed(2)} m &nbsp; Y: ${utm.y.toFixed(2)} m</span>
+            </div>
             ${fieldsHtml ? `<table class="fields-table">${fieldsHtml}</table>` : ''}
             <div class="photos-grid" id="photos-grid-${f.id}">
                 ${photosHtml}
