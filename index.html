@@ -1710,6 +1710,7 @@ async function exportHtmlReport() {
     .buttons-row { display: flex; gap: 10px; flex-wrap: wrap; }
     .print-btn { background:#2563eb; color:white; border:none; padding:8px 16px; border-radius:6px; font-weight:bold; cursor:pointer; font-size:13px; }
     .restore-btn { background:#10b981; color:white; border:none; padding:8px 16px; border-radius:6px; font-weight:bold; cursor:pointer; font-size:13px; }
+    .save-btn { background:#7c3aed; color:white; border:none; padding:8px 16px; border-radius:6px; font-weight:bold; cursor:pointer; font-size:13px; }
     .control-hint { font-size:12px; color:#6b7280; margin:0; max-width: 800px; line-height: 1.4; }
     
     .report-header { text-align:center; margin-bottom:24px; }
@@ -1756,11 +1757,12 @@ async function exportHtmlReport() {
 <body>
     <div class="control-bar no-print">
         <h2>🔧 Personalitza l'informe</h2>
-        <p class="control-hint">Amaga els camps amb les caselles, oculta punts sencers amb el botó "👁️ Amaga punt", elimina fotos amb la "×" i clica qualsevol text per editar-lo. (Aquests canvis només són per a imprimir i no modifiquen les dades originals).</p>
+        <p class="control-hint">Amaga els camps amb les caselles, oculta punts sencers amb el botó "👁️ Amaga punt", elimina fotos amb la "×" i clica qualsevol text per editar-lo. Aquests canvis no toquen les dades originals de l'app — si els vols conservar, prem "💾 Desa una còpia personalitzada" per baixar un nou fitxer HTML amb l'estat actual.</p>
         <div class="field-toggles">${fieldTogglesHtml}</div>
         <div class="buttons-row">
             <button class="print-btn" onclick="window.print()">🖨️ Imprimeix / Desa com a PDF</button>
             <button class="restore-btn" onclick="document.querySelectorAll('.point-card').forEach(c => c.style.display='block')">↺ Restaura punts amagats</button>
+            <button class="save-btn" onclick="saveEditedCopy()">💾 Desa una còpia personalitzada</button>
         </div>
     </div>
     <div class="report-header">
@@ -1773,6 +1775,18 @@ async function exportHtmlReport() {
             document.querySelectorAll('[data-field="' + key + '"]').forEach(el => {
                 el.style.display = show ? '' : 'none';
             });
+        }
+
+        function saveEditedCopy() {
+            // Clonem la pàgina TAL COM ESTÀ ARA (punts amagats, fotos
+            // eliminades, text editat...) i la baixem com un HTML nou.
+            const html = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
+            const blob = new Blob([html], { type: 'text/html' });
+            const a = document.createElement('a');
+            a.href = URL.createObjectURL(blob);
+            a.download = 'informe_editat_' + Date.now() + '.html';
+            a.click();
+            setTimeout(() => URL.revokeObjectURL(a.href), 5000);
         }
     <\/script>
 </body>
