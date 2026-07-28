@@ -156,14 +156,9 @@
                 <span id="quality-size-hint" class="text-amber-600 shrink-0">~300 KB</span>
             </div>
             <div class="flex gap-2 mt-1">
-                <label class="flex-1 border-2 border-dashed border-blue-300 bg-blue-50 text-blue-700 font-semibold py-3 px-2 rounded-lg flex flex-col items-center justify-center gap-1 cursor-pointer hover:bg-blue-100 transition">
-                    <i data-lucide="camera" class="w-6 h-6"></i>
-                    <span class="text-sm">Càmera</span>
-                    <input type="file" accept="image/*" capture="environment" class="hidden" onchange="handlePhoto(event)" onclick="suspendMap()">
-                </label>
                 <label class="flex-1 border-2 border-dashed border-purple-300 bg-purple-50 text-purple-700 font-semibold py-3 px-2 rounded-lg flex flex-col items-center justify-center gap-1 cursor-pointer hover:bg-purple-100 transition">
                     <i data-lucide="image" class="w-6 h-6"></i>
-                    <span class="text-sm">Galeria</span>
+                    <span class="text-sm">Afegeix Fotos</span>
                     <input type="file" accept="image/*" multiple class="hidden" onchange="handlePhoto(event)" onclick="suspendMap()">
                 </label>
             </div>
@@ -1015,57 +1010,20 @@ async function handlePhoto(event) {
             continue;
         }
 
-        // PAS 3: descàrrega
-        _memMark(`${fLabel}:abans-download`);
-        try {
-            const dlUrl = URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.href = dlUrl;
-            const fotoIndex = ((window._pendingPhotoKeys || []).length) + i + 1;
-            a.download = `${layerName}_${_sessionDate}/${layerName}_punt_${numPunt}_foto_${fotoIndex}.jpg`;
-            a.style.display = 'none';
-            document.body.appendChild(a); a.click(); document.body.removeChild(a);
-            setTimeout(() => URL.revokeObjectURL(dlUrl), 3000);
-            _memMark(`${fLabel}:download-disparat`);
-        } catch (err) {
-            _memError(`${fLabel}:download`, err);
-            console.warn('Descàrrega fallida (no crític):', err);
-        }
-
-        // PAS 4: alliberar blob i previsualitzar
-        blob = null;
-        await new Promise(r => setTimeout(r, 50));
-        _memMark(`${fLabel}:blob-alliberat`);
-
-        try {
-            const previewBlob = await getBlobFromDB(dbKey);
-            if (previewBlob) {
-                _memMark(`${fLabel}:abans-preview`);
-                const previewUrl = URL.createObjectURL(previewBlob);
-                const imgNode = document.createElement('img');
-                imgNode.className = 'rounded-lg max-h-24 object-cover w-full border';
-                imgNode.dataset.dbkey = dbKey;
-                imgNode.onload  = () => { URL.revokeObjectURL(previewUrl); _memMark(`${fLabel}:preview-carregada`); };
-                imgNode.onerror = () => { URL.revokeObjectURL(previewUrl); };
-                imgNode.src = previewUrl;
-                pc.appendChild(imgNode);
+        // PAS 3: IndexedDB (per a miniatures i export ZIP).
+            // No es fa cap còpia extra a Baixades: la foto original ja
+            // viu al teu mòbil (d'on l'has triat), no cal duplicar-la.
+            _memMark(`${fLabel}:abans-indexeddb`);
+            try {
+                await saveBlobToDB(dbKey, blob);
+                _memMark(`${fLabel}:indexeddb-ok`);
+                if (!window._pendingPhotoKeys) window._pendingPhotoKeys = [];
+                window._pendingPhotoKeys.push(dbKey);
+                window._photosThisSession = (window._photosThisSession || 0) + 1;
+            } catch (err) {
+                _memError(`${fLabel}:indexeddb`, err);
+                showNotification(`⚠️ No s'ha pogut desar la foto ${i + 1} a l'app (torna-la a afegir si cal). L'original del mòbil no es toca.`, true);
             }
-        } catch (err) {
-            _memError(`${fLabel}:preview`, err);
-            console.warn('Previsualització fallida (no crític):', err);
-        }
-
-        if (!window._pendingPhotoKeys) window._pendingPhotoKeys = [];
-        window._pendingPhotoKeys.push(dbKey);
-        _memMark(`${fLabel}:fi`);
-
-        if (i < files.length - 1) await new Promise(r => setTimeout(r, 150));
-    }
-
-    const total = (window._pendingPhotoKeys || []).length;
-    statusEl.innerText = `${total} foto(es) ✓ (desades a Downloads)`;
-    _memMark('handlePhoto:completat');
-}
 
 // ── GUARDAR PUNT ──────────────────────────────────────────────
 async function savePoint() {
