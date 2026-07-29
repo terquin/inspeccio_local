@@ -1085,16 +1085,32 @@ async function openCameraModal() {
     const video = document.getElementById('camera-video');
     suspendMap();
 
+    // Demanem resolució alta explícitament — sense això, el navegador sol
+    // donar una resolució de vídeo baixa (pensada per videotrucades).
+    const constraints = {
+        video: {
+            facingMode: _cameraFacingMode,
+            width:  { ideal: 3840 },
+            height: { ideal: 2160 }
+        },
+        audio: false
+    };
+
     try {
-        _cameraStream = await navigator.mediaDevices.getUserMedia({
-            video: { facingMode: _cameraFacingMode },
-            audio: false
-        });
+        _cameraStream = await navigator.mediaDevices.getUserMedia(constraints);
     } catch (err) {
-        console.error('Error obrint la càmera:', err);
-        showNotification('❌ No s\'ha pogut obrir la càmera (comprova els permisos)', true);
-        resumeMap();
-        return;
+        // Reserva: si el mòbil rebutja aquesta resolució, ho provem sense exigir-la
+        try {
+            _cameraStream = await navigator.mediaDevices.getUserMedia({
+                video: { facingMode: _cameraFacingMode },
+                audio: false
+            });
+        } catch (err2) {
+            console.error('Error obrint la càmera:', err2);
+            showNotification('❌ No s\'ha pogut obrir la càmera (comprova els permisos)', true);
+            resumeMap();
+            return;
+        }
     }
 
     video.srcObject = _cameraStream;
@@ -1127,47 +1143,78 @@ function closeCameraModal() {
 async function switchCamera() {
     _cameraFacingMode = (_cameraFacingMode === 'environment') ? 'user' : 'environment';
     stopCameraStream();
+    const constraints = {
+        video: {
+            facingMode: _cameraFacingMode,
+            width:  { ideal: 3840 },
+            height: { ideal: 2160 }
+        },
+        audio: false
+    };
     try {
-        _cameraStream = await navigator.mediaDevices.getUserMedia({
-            video: { facingMode: _cameraFacingMode },
-            audio: false
-        });
-        document.getElementById('camera-video').srcObject = _cameraStream;
+        _cameraStream = await navigator.mediaDevices.getUserMedia(constraints);
     } catch (err) {
-        showNotification('❌ No s\'ha pogut canviar de càmera', true);
+        try {
+            _cameraStream = await navigator.mediaDevices.getUserMedia({
+                video: { facingMode: _cameraFacingMode },
+                audio: false
+            });
+        } catch (err2) {
+            showNotification('❌ No s\'ha pogut canviar de càmera', true);
+            return;
+        }
     }
+    document.getElementById('camera-video').srcObject = _cameraStream;
 }
 
 async function capturePhotoFromCamera() {
     if (window._processingPhotos) return;
-    const video = document.getElementById('camera-video');
-    const canvas = document.getElementById('camera-canvas');
-    if (!video.videoWidth) return;
-
+    if (!_cameraStream) return;
     window._processingPhotos = true;
-    canvas.width = video.videoWidth;
-    canvas.height = video.videoHeight;
-    const ctx = canvas.getContext('2d');
-    ctx.drawImage(video, 0, 0);
 
-    canvas.toBlob(async (blob) => {
-        canvas.width = 1; canvas.height = 1;
-        try {
-            if (!blob) { showNotification('❌ Error capturant la foto', true); return; }
+    try {
+        const track = _cameraStream.getVideoTracks()[0];
+        let blob = null;
 
-            const quality = parseFloat(document.getElementById('quality-select').value) || 0.7;
-            const maxDim  = quality >= 1.0 ? 2048 : 1024;
-
-            await processPhotoFile(blob, _cameraPhotoCount, _cameraSessionPrefix, quality, maxDim);
-            _cameraPhotoCount++;
-
-            const badge = document.getElementById('camera-count-badge');
-            badge.innerText = `${_cameraPhotoCount} foto(es)`;
-            badge.classList.remove('hidden');
-        } finally {
-            window._processingPhotos = false;
+        // Mètode 1 (millor qualitat): foto real des del maquinari de la
+        // càmera — més resolució que un simple fotograma del vídeo.
+        if (window.ImageCapture && track) {
+            try {
+                const imageCapture = new ImageCapture(track);
+                blob = await imageCapture.takePhoto();
+            } catch (err) {
+                console.warn('ImageCapture no disponible, es farà servir el mètode alternatiu:', err);
+                blob = null;
+            }
         }
-    }, 'image/jpeg', 0.92);
+
+        // Mètode 2 (reserva): fotograma del vídeo en directe
+        if (!blob) {
+            const video = document.getElementById('camera-video');
+            const canvas = document.getElementById('camera-canvas');
+            if (!video.videoWidth) return;
+            canvas.width = video.videoWidth;
+            canvas.height = video.videoHeight;
+            const ctx = canvas.getContext('2d');
+            ctx.drawImage(video, 0, 0);
+            blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/jpeg', 0.92));
+            canvas.width = 1; canvas.height = 1;
+        }
+
+        if (!blob) { showNotification('❌ Error capturant la foto', true); return; }
+
+        const quality = parseFloat(document.getElementById('quality-select').value) || 0.7;
+        const maxDim  = quality >= 1.0 ? 2048 : 1024;
+
+        await processPhotoFile(blob, _cameraPhotoCount, _cameraSessionPrefix, quality, maxDim);
+        _cameraPhotoCount++;
+
+        const badge = document.getElementById('camera-count-badge');
+        badge.innerText = `${_cameraPhotoCount} foto(es)`;
+        badge.classList.remove('hidden');
+    } finally {
+        window._processingPhotos = false;
+    }
 }
 
 function finishCameraSession() {
