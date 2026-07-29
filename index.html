@@ -978,7 +978,7 @@ function cleanCache() {
 }
 
 // ── CAPTURA DE FOTO ───────────────────────────────────────────
-async function processPhotoFile(file, index, sessionPrefix, quality, maxDim) {
+async function processPhotoFile(file, index, sessionPrefix, quality, maxDim, saveToDownloads = false) {
     const fLabel = `foto_${sessionPrefix}_${index}`;
     const pc = document.getElementById('photo-preview-container');
     pc.classList.remove('hidden');
@@ -996,6 +996,23 @@ async function processPhotoFile(file, index, sessionPrefix, quality, maxDim) {
         return;
     } finally {
         if (fileUrl) { URL.revokeObjectURL(fileUrl); fileUrl = null; }
+    }
+
+    // Només per a fotos fetes amb la Càmera pròpia: com que mai passen per
+    // la galeria del mòbil, en guardem una còpia a Baixades com a xarxa
+    // de seguretat (les de Galeria ja tenen l'original allà, no cal duplicar).
+    if (saveToDownloads) {
+        try {
+            const dlUrl = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = dlUrl;
+            a.download = `${layerName}_${_sessionDate}/${layerName}_${sessionPrefix}_${index}.jpg`;
+            a.style.display = 'none';
+            document.body.appendChild(a); a.click(); document.body.removeChild(a);
+            setTimeout(() => URL.revokeObjectURL(dlUrl), 3000);
+        } catch (err) {
+            console.warn('Còpia de seguretat a Baixades fallida (no crític):', err);
+        }
     }
 
     const dbKey = `${sessionPrefix}_${index}`;
@@ -1206,7 +1223,7 @@ async function capturePhotoFromCamera() {
         const quality = parseFloat(document.getElementById('quality-select').value) || 0.7;
         const maxDim  = quality >= 1.0 ? 2048 : 1024;
 
-        await processPhotoFile(blob, _cameraPhotoCount, _cameraSessionPrefix, quality, maxDim);
+        await processPhotoFile(blob, _cameraPhotoCount, _cameraSessionPrefix, quality, maxDim, true);
         _cameraPhotoCount++;
 
         const badge = document.getElementById('camera-count-badge');
