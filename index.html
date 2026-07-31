@@ -232,6 +232,13 @@
         <button onclick="exportHtmlReport()" class="w-full bg-pink-600 text-white py-3 rounded-lg font-bold flex items-center justify-center gap-2 shadow-sm mt-2">
             <i data-lucide="image"></i> Exportar Informe HTML (amb fotos)
         </button>
+        <button onclick="exportInstallerChecklist()" class="w-full bg-emerald-600 text-white py-3 rounded-lg font-bold flex items-center justify-center gap-2 shadow-sm mt-2">
+            <i data-lucide="clipboard-check"></i> Generar Checklist Instal·ladors
+        </button>
+        <button onclick="document.getElementById('import-checklist-file').click()" class="w-full bg-emerald-50 text-emerald-700 py-3 rounded-lg font-semibold flex items-center justify-center gap-2 border border-emerald-200 mt-2">
+            <i data-lucide="clipboard-check"></i> Importar Resultats Checklist
+        </button>
+        <input type="file" id="import-checklist-file" accept=".json,application/json" class="hidden" onchange="importChecklistResults(event)">
         <button onclick="document.getElementById('import-file').click()" class="w-full bg-indigo-50 text-indigo-600 py-3 rounded-lg font-semibold flex items-center justify-center gap-2 border border-indigo-200 mt-2">
             <i data-lucide="folder-up"></i> Importar ZIP / GeoJSON
         </button>
@@ -2068,6 +2075,236 @@ async function exportHtmlReport() {
         showNotification('❌ Error generant l\'informe', true);
         console.error(err);
     }
+}
+
+// ── CHECKLIST PER A INSTAL·LADORS (sense edició, només check + foto) ──
+async function exportInstallerChecklist() {
+    if (!savedPoints.length) { showNotification('⚠️ No hi ha punts per exportar', true); return; }
+    showNotification('⏳ Generant checklist...');
+
+    const sorted = [...savedPoints].sort((a, b) => (a.properties.FID || 0) - (b.properties.FID || 0));
+    let cardsHtml = '';
+
+    for (const f of sorted) {
+        const props = f.properties;
+        const gmapsUrl = `https://www.google.com/maps/search/?api=1&query=${f.geometry.coordinates[1]},${f.geometry.coordinates[0]}`;
+
+        let fieldsHtml = '';
+        customFields.forEach(cf => {
+            let val = props[cf.label] !== undefined ? props[cf.label] : '';
+            if (val === '') {
+                if (cf.id === 'cf_codi') val = props.codi || '';
+                if (cf.id === 'cf_tipus') val = props.tipus || '';
+                if (cf.id === 'cf_estat') val = props.estat || '';
+                if (cf.id === 'cf_notes') val = props.notes || '';
+            }
+            if (val !== null && val !== '') {
+                fieldsHtml += `<tr><td class="field-label">${cf.label}</td><td>${val}</td></tr>`;
+            }
+        });
+
+        cardsHtml += `
+        <div class="point-card" data-point-id="${f.id}" data-fid="${props.FID}">
+            <div class="point-header">
+                <span class="point-id">#${props.FID}</span>
+                <a class="gmaps-link" href="${gmapsUrl}" target="_blank" rel="noopener">📍 Google Maps</a>
+            </div>
+            ${fieldsHtml ? `<table class="fields-table">${fieldsHtml}</table>` : ''}
+            <label class="revisat-toggle">
+                <input type="checkbox" class="revisat-checkbox" ${props.revisat ? 'checked' : ''}>
+                <span>Marcar com a REVISAT</span>
+            </label>
+            <div class="photos-grid" id="cl-photos-${f.id}"></div>
+            <label class="add-photo-btn">
+                ➕ Afegeix foto
+                <input type="file" accept="image/*" multiple style="display:none" onchange="clAddPhotos('${f.id}', this.files)">
+            </label>
+        </div>`;
+    }
+
+    const now = new Date();
+    const dateStr = now.toLocaleDateString('ca-ES', { year: 'numeric', month: 'long', day: 'numeric' });
+
+    const fullHtml = `<!DOCTYPE html>
+<html lang="ca">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Checklist ${layerName}</title>
+<style>
+    body { font-family: -apple-system, Segoe UI, Roboto, Arial, sans-serif; background:#f3f4f6; margin:0; padding:16px; color:#1f2937; }
+    .control-bar { background:white; border-radius:10px; padding:16px; margin-bottom:16px; box-shadow:0 1px 3px rgba(0,0,0,.1); position:sticky; top:8px; z-index:50; }
+    .control-bar h2 { margin:0 0 8px; font-size:18px; }
+    .hint { font-size:13px; color:#6b7280; margin:0 0 12px; line-height:1.4; }
+    .send-btn { background:#059669; color:white; border:none; padding:12px 20px; border-radius:8px; font-weight:bold; cursor:pointer; font-size:15px; width:100%; }
+    .summary { text-align:center; color:#6b7280; font-size:13px; margin:0 0 16px; }
+    .point-card { background:white; border-radius:10px; padding:16px; margin-bottom:12px; box-shadow:0 1px 3px rgba(0,0,0,.08); }
+    .point-header { display:flex; align-items:center; gap:10px; margin-bottom:10px; flex-wrap:wrap; }
+    .point-id { font-family:monospace; background:#eff6ff; color:#1d4ed8; border:1px solid #bfdbfe; border-radius:4px; padding:3px 8px; font-weight:bold; }
+    .gmaps-link { background:#eff6ff; color:#1d4ed8; border:1px solid #bfdbfe; border-radius:4px; padding:3px 8px; font-size:12px; font-weight:bold; text-decoration:none; }
+    .fields-table { width:100%; border-collapse:collapse; font-size:13px; margin-bottom:12px; }
+    .fields-table td { padding:4px 6px; border-bottom:1px solid #f3f4f6; vertical-align:top; }
+    .field-label { font-weight:bold; color:#374151; width:35%; white-space:nowrap; }
+    .revisat-toggle { display:flex; align-items:center; gap:8px; background:#f0fdf4; border:1px solid #bbf7d0; padding:10px; border-radius:8px; margin-bottom:10px; cursor:pointer; font-weight:bold; color:#166534; }
+    .revisat-toggle input { width:20px; height:20px; }
+    .photos-grid { display:flex; flex-wrap:wrap; gap:8px; margin-bottom:8px; }
+    .photo-wrap { position:relative; }
+    .photo-del { position:absolute; top:-6px; right:-6px; background:#ef4444; color:white; border:2px solid white; border-radius:50%; width:20px; height:20px; font-size:12px; line-height:1; cursor:pointer; }
+    .cl-photo { width:100px; height:100px; object-fit:cover; border-radius:6px; border:1px solid #e5e7eb; }
+    .add-photo-btn { display:inline-block; padding:8px 14px; border:2px dashed #a78bfa; color:#7c3aed; border-radius:6px; font-size:13px; font-weight:bold; cursor:pointer; background:#f5f3ff; }
+</style>
+</head>
+<body>
+    <div class="control-bar">
+        <h2>✅ Checklist d'inspecció — ${layerName}</h2>
+        <p class="hint">Marca "Revisat" a cada punt que comprovis. Pots afegir una foto com a prova. Quan acabis, prem "Enviar resultats" i envia el fitxer generat a qui t'ha compartit aquesta llista (WhatsApp, correu...).</p>
+        <button class="send-btn" onclick="clPrepareResults()">📤 Enviar resultats</button>
+    </div>
+    <p class="summary">Generat el ${dateStr} · ${sorted.length} punts</p>
+    ${cardsHtml}
+    <script>
+        function resizeImageFile(file, maxDim, quality) {
+            return new Promise((resolve, reject) => {
+                const reader = new FileReader();
+                reader.onload = function(e) {
+                    const img = new Image();
+                    img.onload = function() {
+                        let width = img.width, height = img.height;
+                        if (width > maxDim || height > maxDim) {
+                            if (width > height) { height = Math.round(height * maxDim / width); width = maxDim; }
+                            else { width = Math.round(width * maxDim / height); height = maxDim; }
+                        }
+                        const canvas = document.createElement('canvas');
+                        canvas.width = width; canvas.height = height;
+                        const ctx = canvas.getContext('2d');
+                        ctx.drawImage(img, 0, 0, width, height);
+                        resolve(canvas.toDataURL('image/jpeg', quality));
+                    };
+                    img.onerror = function() { reject(new Error("No es pot llegir la imatge")); };
+                    img.src = e.target.result;
+                };
+                reader.onerror = function() { reject(new Error("No es pot llegir el fitxer")); };
+                reader.readAsDataURL(file);
+            });
+        }
+
+        async function clAddPhotos(pointId, fileList) {
+            const grid = document.getElementById('cl-photos-' + pointId);
+            if (!grid) return;
+            for (const file of fileList) {
+                try {
+                    const dataUrl = await resizeImageFile(file, 900, 0.65);
+                    const wrap = document.createElement('div');
+                    wrap.className = 'photo-wrap';
+                    wrap.innerHTML = '<button class="photo-del" onclick="this.parentElement.remove()" title="Eliminar">×</button>' +
+                        '<img class="cl-photo" src="' + dataUrl + '" alt="Foto">';
+                    grid.appendChild(wrap);
+                } catch (err) {
+                    alert("No s'ha pogut afegir una foto");
+                }
+            }
+        }
+
+        function clPrepareResults() {
+            const cards = document.querySelectorAll('.point-card');
+            const results = [];
+            let totalPhotos = 0;
+
+            cards.forEach(card => {
+                const id = card.dataset.pointId;
+                const revisat = card.querySelector('.revisat-checkbox').checked;
+                const photoImgs = card.querySelectorAll('.cl-photo');
+                const photos = Array.from(photoImgs).map(img => img.src);
+                totalPhotos += photos.length;
+                results.push({ id: id, revisat: revisat, photos: photos });
+            });
+
+            const payload = {
+                type: 'checklist_results',
+                generatedAt: new Date().toISOString(),
+                points: results
+            };
+
+            const blob = new Blob([JSON.stringify(payload)], { type: 'application/json' });
+            const a = document.createElement('a');
+            a.href = URL.createObjectURL(blob);
+            a.download = 'resultats_checklist_' + Date.now() + '.json';
+            a.click();
+            setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+
+            const numRevisats = results.filter(function(r){ return r.revisat; }).length;
+            alert("Fitxer de resultats generat (" + numRevisats + " revisats, " + totalPhotos + " fotos). Envia'l per WhatsApp o correu a qui et va compartir aquesta checklist.");
+        }
+    <\/script>
+</body>
+</html>`;
+
+    try {
+        const blob = new Blob([fullHtml], { type: 'text/html' });
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = `${layerName}_checklist_${Date.now()}.html`;
+        a.click();
+        setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+        showNotification('✅ Checklist generat!');
+    } catch (err) {
+        showNotification('❌ Error generant la checklist', true);
+        console.error(err);
+    }
+}
+
+function importChecklistResults(event) {
+    const file = event.target.files[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = async (e) => {
+        try {
+            const data = JSON.parse(e.target.result);
+            if (data.type !== 'checklist_results' || !Array.isArray(data.points)) {
+                throw new Error('Format no vàlid');
+            }
+
+            let updatedCount = 0;
+            let photosAdded = 0;
+
+            for (const result of data.points) {
+                const f = savedPoints.find(feat => feat.id === result.id);
+                if (!f) continue;
+
+                if (result.revisat) {
+                    f.properties.revisat = true;
+                    updatedCount++;
+                }
+
+                if (!f.properties.local_keys) f.properties.local_keys = [];
+
+                for (const dataUrl of (result.photos || [])) {
+                    try {
+                        const resp = await fetch(dataUrl);
+                        const blob = await resp.blob();
+                        const dbKey = `checklist_${f.id}_${Date.now()}_${photosAdded}`;
+                        await saveBlobToDB(dbKey, blob);
+                        f.properties.local_keys.push(dbKey);
+                        photosAdded++;
+                    } catch (err) {
+                        console.warn('Error important una foto de la checklist:', err);
+                    }
+                }
+                f.properties.n_fotos = f.properties.local_keys.length;
+                upsertMarker(f);
+            }
+
+            localStorage.setItem('inspeccions_qgis', JSON.stringify(savedPoints));
+            closeAllPanels();
+            showNotification(`✅ Resultats importats: ${updatedCount} punts marcats, ${photosAdded} fotos afegides`);
+        } catch (err) {
+            showNotification('❌ Error important els resultats', true);
+            console.error(err);
+        }
+    };
+    reader.readAsText(file);
+    event.target.value = '';
 }
 
 // ── ADAPTAR CAMPS A PARTIR D'UN GEOJSON EXTERN ───────────────
