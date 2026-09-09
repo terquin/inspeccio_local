@@ -243,12 +243,9 @@
             <i data-lucide="folder-up"></i> Importar ZIP / GeoJSON
         </button>
         <button onclick="document.getElementById('import-csv-file').click()" class="w-full bg-teal-50 text-teal-700 py-3 rounded-lg font-semibold flex items-center justify-center gap-2 border border-teal-200 mt-2">
-            <i data-lucide="table"></i> Importar CSV (amb fotos en ZIP)
+            <i data-lucide="table"></i> Importar CSV / ZIP amb CSV
         </button>
         <input type="file" id="import-csv-file" accept=".csv,.zip,text/csv,application/zip" class="hidden" onchange="importCSVorZipCSV(event)">
-        <button onclick="document.getElementById('import-csv-file').click()" class="w-full bg-teal-50 text-teal-700 py-3 rounded-lg font-semibold flex items-center justify-center gap-2 border border-teal-200 mt-2">
-            <i data-lucide="table"></i> Importar CSV
-        </button>
         <input type="file" id="import-csv-file" accept=".csv,text/csv" class="hidden" onchange="importCSV(event)">
         <button onclick="exportDiagnosticZip()" class="w-full bg-purple-50 text-purple-700 py-3 rounded-lg font-semibold flex items-center justify-center gap-2 border border-purple-200 mt-2">
             <i data-lucide="bug"></i> Descarregar diagnòstic d'errors
@@ -2319,10 +2316,16 @@ function importChecklistResults(event) {
 function detectAndAdaptFields(features) {
     if (!features || features.length === 0) return false;
 
-    const internalKeys = new Set(['FID', 'num_punt', 'local_keys', 'n_fotos', 'revisat', 'data', 'hora']);
+        const internalKeys = new Set(['FID', 'num_punt', 'local_keys', 'n_fotos', 'revisat', 'data', 'hora', 'data_hora', 'id', '[NO_COLUMN]']);
     const fotoKeyPattern = /^foto_url_/;
     const sampleProps = features[0].properties || {};
-    const importedKeys = Object.keys(sampleProps).filter(k => !internalKeys.has(k) && !fotoKeyPattern.test(k));
+        const importedKeys = Object.keys(sampleProps).filter(k =>
+        !internalKeys.has(k) &&
+        !internalKeys.has(k.trim()) &&
+        !fotoKeyPattern.test(k) &&
+        k.trim() !== '' &&
+        k.trim() !== '[NO_COLUMN]'
+    );
 
     const currentLabels = new Set(customFields.map(cf => cf.label.toLowerCase()));
     const newKeys = importedKeys.filter(k => !currentLabels.has(k.toLowerCase()));
@@ -2347,22 +2350,7 @@ function detectAndAdaptFields(features) {
     showNotification(`✅ ${newKeys.length} camp(s) nou(s) afegit(s) al formulari!`, false);
     return true;
 }
-    const matchCount = importedKeys.filter(k => currentLabels.has(k.toLowerCase())).length;
-    const matchRatio = importedKeys.length > 0 ? matchCount / importedKeys.length : 1;
-    if (matchRatio >= 0.5) return false;
-
-    const msg = `La capa importada té camps diferents als actuals:\n\n` +
-        `Camps actuals: ${customFields.map(cf => cf.label).join(', ')}\n\n` +
-        `Camps del fitxer: ${importedKeys.join(', ')}\n\n` +
-        `Vols adaptar els camps del formulari als del fitxer importat?`;
-
-    if (!confirm(msg)) return false;
-
-    const newFields = importedKeys.map((key, i) => ({
-        id: 'cf_import_' + i + '_' + Date.now(),
-        label: key,
-        type: 'text'
-    }));
+   
 
     customFields = newFields;
     localStorage.setItem('custom_fields', JSON.stringify(customFields));
