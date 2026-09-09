@@ -1701,6 +1701,11 @@ function exportGeoJSONonly() {
         f.id = parseInt(f.properties.FID) || (i + 1);
         const utm = wgs84ToUtm31(f.geometry.coordinates[0], f.geometry.coordinates[1]);
         f.geometry.coordinates = [utm.x, utm.y];
+        // Actualitza sempre els camps de coordenades amb valors correctes
+        // (cobreix punts creats a la app que no els tenien, i punts del CSV amb coma decimal)
+        f.properties['GA_COORDX'] = utm.x.toFixed(6);
+        f.properties['GA_COORDY'] = utm.y.toFixed(6);
+        f.properties['GA_GEOM']   = `POINT (${utm.x.toFixed(8)} ${utm.y.toFixed(8)})`;
 
         const keys = f.properties.local_keys || [];
         delete f.properties.local_keys;
@@ -1729,6 +1734,9 @@ async function exportDataAsZip() {
         f.id = parseInt(f.properties.FID) || (i + 1);
         const utm = wgs84ToUtm31(f.geometry.coordinates[0], f.geometry.coordinates[1]);
         f.geometry.coordinates = [utm.x, utm.y];
+        f.properties['GA_COORDX'] = utm.x.toFixed(6);
+        f.properties['GA_COORDY'] = utm.y.toFixed(6);
+        f.properties['GA_GEOM']   = `POINT (${utm.x.toFixed(8)} ${utm.y.toFixed(8)})`;
 
         const keys = f.properties.local_keys || [];
         delete f.properties.local_keys;
@@ -2393,8 +2401,21 @@ async function importData(event) {
                     }
 
                     const [x, y] = f.geometry.coordinates;
-                    const wgs84 = utm31ToWgs84(x, y);
-                    f.geometry.coordinates = [wgs84.lon, wgs84.lat];
+                    // Si x < 180 i y < 90 ja és WGS84 (lon/lat), no cal convertir
+                    // Si x > 180 és UTM (metres), cal convertir
+                    let lon, lat;
+                    if (Math.abs(x) > 180) {
+                        const wgs84 = utm31ToWgs84(x, y);
+                        lon = wgs84.lon; lat = wgs84.lat;
+                    } else {
+                        lon = x; lat = y;
+                    }
+                    f.geometry.coordinates = [lon, lat];
+                    // Actualitza els camps de coordenades
+                    const utmRecalc = wgs84ToUtm31(lon, lat);
+                    f.properties['GA_COORDX'] = utmRecalc.x.toFixed(6);
+                    f.properties['GA_COORDY'] = utmRecalc.y.toFixed(6);
+                    f.properties['GA_GEOM']   = `POINT (${utmRecalc.x.toFixed(8)} ${utmRecalc.y.toFixed(8)})`;
                     
                     f.id = Date.now().toString() + Math.floor(Math.random() * 10000);
                     if (!f.properties.local_keys) f.properties.local_keys = [];
@@ -2480,9 +2501,22 @@ async function importData(event) {
                             continue;
                         }
 
-                        const [x, y] = f.geometry.coordinates;
+                    const [x, y] = f.geometry.coordinates;
+                    // Si x < 180 i y < 90 ja és WGS84 (lon/lat), no cal convertir
+                    // Si x > 180 és UTM (metres), cal convertir
+                    let lon, lat;
+                    if (Math.abs(x) > 180) {
                         const wgs84 = utm31ToWgs84(x, y);
-                        f.geometry.coordinates = [wgs84.lon, wgs84.lat];
+                        lon = wgs84.lon; lat = wgs84.lat;
+                    } else {
+                        lon = x; lat = y;
+                    }
+                    f.geometry.coordinates = [lon, lat];
+                    // Actualitza els camps de coordenades
+                    const utmRecalc = wgs84ToUtm31(lon, lat);
+                    f.properties['GA_COORDX'] = utmRecalc.x.toFixed(6);
+                    f.properties['GA_COORDY'] = utmRecalc.y.toFixed(6);
+                    f.properties['GA_GEOM']   = `POINT (${utmRecalc.x.toFixed(8)} ${utmRecalc.y.toFixed(8)})`;
                         if (!f.properties.local_keys) f.properties.local_keys = [];
                         f.id = Date.now().toString() + Math.floor(Math.random() * 10000);
 
@@ -2651,6 +2685,11 @@ async function importCSVorZipCSV(event) {
 
                 const featureId = Date.now().toString() + Math.floor(Math.random() * 10000);
 
+                // Normalitza les coordenades amb punt decimal i precisió completa
+                props['GA_COORDX'] = x.toFixed(6);
+                props['GA_COORDY'] = y.toFixed(6);
+                props['GA_GEOM']   = `POINT (${x.toFixed(8)} ${y.toFixed(8)})`;
+                
                 // Enllaça fotos: busca tots els camps foto_url_N
                 const fotoKeys = headers.filter(h => /^foto_url_/i.test(h.trim()));
                 for (const fk of fotoKeys) {
