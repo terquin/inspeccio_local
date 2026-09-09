@@ -246,7 +246,6 @@
             <i data-lucide="table"></i> Importar CSV / ZIP amb CSV
         </button>
         <input type="file" id="import-csv-file" accept=".csv,.zip,text/csv,application/zip" class="hidden" onchange="importCSVorZipCSV(event)">
-        <input type="file" id="import-csv-file" accept=".csv,text/csv" class="hidden" onchange="importCSV(event)">
         <button onclick="exportDiagnosticZip()" class="w-full bg-purple-50 text-purple-700 py-3 rounded-lg font-semibold flex items-center justify-center gap-2 border border-purple-200 mt-2">
             <i data-lucide="bug"></i> Descarregar diagnòstic d'errors
         </button>
@@ -2351,13 +2350,6 @@ function detectAndAdaptFields(features) {
     return true;
 }
    
-
-    customFields = newFields;
-    localStorage.setItem('custom_fields', JSON.stringify(customFields));
-    renderAdminCustomFields();
-    showNotification('✅ Camps del formulari actualitzats!', false);
-    return true;
-}
     
 // ── IMPORTAR ZIP / GEOJSON O ARXIUS SOLTS ──────────────────────────
 async function importData(event) {
