@@ -2636,8 +2636,8 @@ async function importCSVorZipCSV(event) {
                     }
                 });
 
-                const x = parseFloat(props['GA_COORDX']);
-                const y = parseFloat(props['GA_COORDY']);
+                const x = parseFloat((props['GA_COORDX'] || '').replace(',', '.'));
+                const y = parseFloat((props['GA_COORDY'] || '').replace(',', '.'));
                 if (isNaN(x) || isNaN(y)) continue;
 
                 const wgs84 = utm31ToWgs84(x, y);
