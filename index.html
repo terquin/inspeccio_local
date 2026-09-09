@@ -2626,7 +2626,7 @@ async function importCSVorZipCSV(event) {
         for (let li = 1; li < lines.length; li++) {
             try {
                 const vals = parseCSVLine(lines[li], sep);
-                if (vals.length < 3) continue;
+                if (vals.length < 2) continue;
 
                 const props = {};
                 headers.forEach((h, idx) => {
