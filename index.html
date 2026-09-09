@@ -242,6 +242,10 @@
         <button onclick="document.getElementById('import-file').click()" class="w-full bg-indigo-50 text-indigo-600 py-3 rounded-lg font-semibold flex items-center justify-center gap-2 border border-indigo-200 mt-2">
             <i data-lucide="folder-up"></i> Importar ZIP / GeoJSON
         </button>
+        <button onclick="document.getElementById('import-csv-file').click()" class="w-full bg-teal-50 text-teal-700 py-3 rounded-lg font-semibold flex items-center justify-center gap-2 border border-teal-200 mt-2">
+            <i data-lucide="table"></i> Importar CSV
+        </button>
+        <input type="file" id="import-csv-file" accept=".csv,text/csv" class="hidden" onchange="importCSV(event)">
         <button onclick="exportDiagnosticZip()" class="w-full bg-purple-50 text-purple-700 py-3 rounded-lg font-semibold flex items-center justify-center gap-2 border border-purple-200 mt-2">
             <i data-lucide="bug"></i> Descarregar diagnòstic d'errors
         </button>
@@ -2520,6 +2524,123 @@ async function importData(event) {
     event.target.value = '';
 }
 
+// ── IMPORTAR CSV ──────────────────────────────────────────────
+// Format esperat: separador ; amb capçalera
+// Coordenades a GA_COORDX (X UTM31) i GA_COORDY (Y UTM31)
+// Camps clau: id → FID, revisat (T/F), Estat, foto_url_1...
+function importCSV(event) {
+    const file = event.target.files[0];
+    event.target.value = '';
+    if (!file) return;
+
+    showNotification('⏳ Llegint CSV...');
+
+    const reader = new FileReader();
+    reader.onload = async (e) => {
+        try {
+            const text = e.target.result;
+
+            // Detecta el separador: ; o ,
+            const sep = text.split('\n')[0].includes(';') ? ';' : ',';
+
+            // Parseja CSV respectant cometes
+            function parseCSVLine(line, sep) {
+                const result = [];
+                let cur = '', inQ = false;
+                for (let i = 0; i < line.length; i++) {
+                    const ch = line[i];
+                    if (ch === '"') { inQ = !inQ; continue; }
+                    if (ch === sep && !inQ) { result.push(cur.trim()); cur = ''; continue; }
+                    cur += ch;
+                }
+                result.push(cur.trim());
+                return result;
+            }
+
+            // Separa línies eliminant \r
+            const lines = text.split('\n').map(l => l.replace(/\r$/, '')).filter(l => l.trim() !== '');
+            if (lines.length < 2) throw new Error('El CSV no té dades');
+
+            const headers = parseCSVLine(lines[0], sep);
+
+            // Troba índexs dels camps de coordenades
+            const iX = headers.findIndex(h => h.trim() === 'GA_COORDX');
+            const iY = headers.findIndex(h => h.trim() === 'GA_COORDY');
+            if (iX === -1 || iY === -1) throw new Error('No s\'han trobat les columnes GA_COORDX i GA_COORDY');
+
+            let importedCount = 0;
+            const features = [];
+
+            for (let li = 1; li < lines.length; li++) {
+                try {
+                    const vals = parseCSVLine(lines[li], sep);
+                    if (vals.length < headers.length / 2) continue; // línia buida o incompleta
+
+                    // Construeix l'objecte de propietats amb tots els camps
+                    const props = {};
+                    headers.forEach((h, idx) => {
+                        const key = h.trim();
+                        if (key && key !== '[NO_COLUMN]') {
+                            props[key] = vals[idx] !== undefined ? vals[idx].trim() : '';
+                        }
+                    });
+
+                    // Coordenades UTM31 → WGS84
+                    const x = parseFloat(props['GA_COORDX']);
+                    const y = parseFloat(props['GA_COORDY']);
+                    if (isNaN(x) || isNaN(y)) {
+                        console.warn('Línia sense coordenades vàlides, s\'omet:', li);
+                        continue;
+                    }
+                    const wgs84 = utm31ToWgs84(x, y);
+
+                    // FID des del camp id
+                    const fid = props['id'] ? parseInt(props['id']) : (importedCount + 1);
+
+                    // revisat: T → true, qualsevol altra cosa → false
+                    props['revisat'] = (props['revisat'] || '').toUpperCase() === 'T';
+
+                    // Neteja el camp id per evitar duplicats de clau
+                    delete props['id'];
+
+                    // Assegura camps interns
+                    props['FID']        = fid;
+                    props['local_keys'] = [];
+                    props['n_fotos']    = 0;
+
+                    const feature = {
+                        type: 'Feature',
+                        id: Date.now().toString() + Math.floor(Math.random() * 10000),
+                        geometry: { type: 'Point', coordinates: [wgs84.lon, wgs84.lat] },
+                        properties: props
+                    };
+
+                    features.push(feature);
+                    importedCount++;
+                } catch (rowErr) {
+                    console.warn('Error a la línia', li, rowErr);
+                }
+            }
+
+            if (features.length === 0) throw new Error('Cap punt importat. Revisa el format del CSV.');
+
+            // Adapta els camps de la primera importació igual que el GeoJSON
+            detectAndAdaptFields(features);
+
+            features.forEach(f => savedPoints.push(f));
+            localStorage.setItem('inspeccions_qgis', JSON.stringify(savedPoints));
+            refreshMapMarkers();
+            closeAllPanels();
+            showNotification(`✅ ${importedCount} punts importats des del CSV!`);
+
+        } catch (err) {
+            console.error('Error important CSV:', err);
+            showNotification('❌ Error CSV: ' + (err.message || 'Desconegut'), true);
+        }
+    };
+    reader.readAsText(file, 'UTF-8');
+}
+    
 // ── ESBORRAR DADES ────────────────────────────────────────────
 function clearData() {
     if (!confirm('Segur? S\'esborraran tots els punts i fotos locals.')) return;
