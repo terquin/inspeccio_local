@@ -2128,7 +2128,6 @@ async function exportHtmlReport() {
         document.addEventListener('DOMContentLoaded', function() { actualitzaComptador(); });
 
         function toggleField(key, show) {
-        function toggleField(key, show) {
             document.querySelectorAll('[data-field="' + key + '"]').forEach(el => {
                 el.style.display = show ? '' : 'none';
             });
