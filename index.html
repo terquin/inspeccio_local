@@ -433,36 +433,119 @@ function renderAdminCustomFields() {
     const container = document.getElementById('custom-fields-admin-list');
     if (!container) return;
     container.innerHTML = '';
-    
+
     if (customFields.length === 0) {
         container.innerHTML = '<div class="text-xs text-blue-500 italic text-center py-2">Cap camp. Pots crear-ne un.</div>';
         return;
     }
-    
+
     customFields.forEach(cf => {
         let typeBadge = cf.type;
-        if(cf.type === 'select') typeBadge += ` (${cf.options.split(',').length} opcions)`;
-        
+        if (cf.type === 'select') typeBadge += ` (${(cf.options||'').split(',').length} opcions)`;
+        const typeLabel = { text:'Text curt', number:'Número', textarea:'Text llarg', select:'Desplegable' }[cf.type] || cf.type;
+
         container.innerHTML += `
-            <div class="flex justify-between items-center bg-white border border-blue-100 p-2 rounded-md text-sm shadow-sm">
-                <div><span class="font-bold text-gray-700">${cf.label}</span> <span class="text-xs text-gray-400">(${typeBadge})</span></div>
-                <button onclick="removeCustomField('${cf.id}')" class="text-red-500 hover:bg-red-50 p-1 rounded transition">
-                    <i data-lucide="trash-2" class="w-4 h-4"></i>
-                </button>
+            <div class="flex flex-col bg-white border border-blue-100 rounded-md shadow-sm text-sm" id="cf-row-${cf.id}">
+                <div class="flex justify-between items-center p-2">
+                    <div>
+                        <span class="font-bold text-gray-700">${cf.label}</span>
+                        <span class="text-xs text-gray-400 ml-1">(${typeLabel})</span>
+                    </div>
+                    <div class="flex gap-1">
+                        <button onclick="toggleEditField('${cf.id}')" title="Editar" class="text-blue-500 hover:bg-blue-50 p-1 rounded transition">
+                            <i data-lucide="pencil" class="w-4 h-4"></i>
+                        </button>
+                        <button onclick="removeCustomField('${cf.id}')" title="Eliminar" class="text-red-500 hover:bg-red-50 p-1 rounded transition">
+                            <i data-lucide="trash-2" class="w-4 h-4"></i>
+                        </button>
+                    </div>
+                </div>
+                <div id="cf-edit-${cf.id}" class="hidden border-t border-blue-100 p-2 flex flex-col gap-2 bg-blue-50 rounded-b-md">
+                    <input type="text" id="cf-edit-name-${cf.id}" value="${cf.label}"
+                        class="border border-gray-300 rounded-md p-2 text-sm outline-none focus:ring-2 focus:ring-blue-500"
+                        placeholder="Nom del camp">
+                    <select id="cf-edit-type-${cf.id}"
+                        onchange="handleEditCfTypeChange('${cf.id}')"
+                        class="border border-gray-300 rounded-md p-2 text-sm outline-none focus:ring-2 focus:ring-blue-500 bg-white">
+                        <option value="text"     ${cf.type==='text'     ? 'selected':''}>Text curt</option>
+                        <option value="number"   ${cf.type==='number'   ? 'selected':''}>Número</option>
+                        <option value="textarea" ${cf.type==='textarea' ? 'selected':''}>Text llarg (amb veu)</option>
+                        <option value="select"   ${cf.type==='select'   ? 'selected':''}>Desplegable</option>
+                    </select>
+                    <input type="text" id="cf-edit-options-${cf.id}"
+                        value="${cf.options || ''}"
+                        placeholder="Opcions separades per coma (ex: Bo,Regular,Dolent)"
+                        class="${cf.type==='select' ? '' : 'hidden'} border border-gray-300 rounded-md p-2 text-sm outline-none focus:ring-2 focus:ring-blue-500">
+                    <button onclick="saveEditField('${cf.id}')"
+                        class="bg-blue-600 text-white py-1.5 rounded-md text-sm font-semibold hover:bg-blue-700 transition">
+                        ✅ Guardar canvis
+                    </button>
+                </div>
             </div>
         `;
     });
     lucide.createIcons();
 }
 
+function toggleEditField(id) {
+    const panel = document.getElementById(`cf-edit-${id}`);
+    if (!panel) return;
+    panel.classList.toggle('hidden');
+}
+
+function handleEditCfTypeChange(id) {
+    const sel = document.getElementById(`cf-edit-type-${id}`);
+    const opt = document.getElementById(`cf-edit-options-${id}`);
+    if (!sel || !opt) return;
+    if (sel.value === 'select') opt.classList.remove('hidden');
+    else opt.classList.add('hidden');
+}
+
+function saveEditField(id) {
+    const cf = customFields.find(f => f.id === id);
+    if (!cf) return;
+
+    const newName = (document.getElementById(`cf-edit-name-${id}`)?.value || '').trim();
+    const newType = document.getElementById(`cf-edit-type-${id}`)?.value || cf.type;
+    const newOpts = (document.getElementById(`cf-edit-options-${id}`)?.value || '').trim();
+
+    if (!newName) { showNotification('⚠️ El nom no pot estar buit', true); return; }
+    if (newName.toUpperCase() === 'FID') { showNotification('⚠️ FID és un nom reservat', true); return; }
+
+    const duplicate = customFields.find(f => f.id !== id && f.label.toLowerCase() === newName.toLowerCase());
+    if (duplicate) { showNotification('⚠️ Ja existeix un camp amb aquest nom', true); return; }
+
+    // Actualitza les propietats del camp
+    const oldLabel = cf.label;
+    cf.label = newName;
+    cf.type  = newType;
+    if (newType === 'select') cf.options = newOpts || 'Opció 1,Opció 2';
+    else delete cf.options;
+
+    // Si el nom ha canviat, actualitza totes les propietats dels punts
+    if (oldLabel !== newName) {
+        savedPoints.forEach(f => {
+            if (f.properties.hasOwnProperty(oldLabel)) {
+                f.properties[newName] = f.properties[oldLabel];
+                delete f.properties[oldLabel];
+            }
+        });
+        localStorage.setItem('inspeccions_qgis', JSON.stringify(savedPoints));
+    }
+
+    localStorage.setItem('custom_fields', JSON.stringify(customFields));
+    renderAdminCustomFields();
+    showNotification('✅ Camp actualitzat');
+}
+
 function addCustomField() {
     const nameInput = document.getElementById('new-cf-name');
     const typeInput = document.getElementById('new-cf-type');
     const optInput  = document.getElementById('new-cf-options');
-    
+
     const name = nameInput.value.trim();
     if (!name) return;
-    
+
     if (name.toUpperCase() === 'FID') {
         showNotification('⚠️ FID és un nom reservat pel sistema', true);
         return;
@@ -480,9 +563,11 @@ function addCustomField() {
 
     customFields.push(newField);
     localStorage.setItem('custom_fields', JSON.stringify(customFields));
-    
+
     nameInput.value = '';
-    optInput.value = '';
+    optInput.value  = '';
+    optInput.classList.add('hidden');
+    typeInput.value = 'text';
     renderAdminCustomFields();
     showNotification('✅ Camp afegit');
 }
