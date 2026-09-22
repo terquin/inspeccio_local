@@ -3172,74 +3172,80 @@ function gmRenderList() {
         item.id = `gm-list-${idx}`;
         item.style.cssText = `display:flex;align-items:center;gap:8px;padding:6px 8px;border:1px solid ${p.selected ? '#3b82f6' : '#e5e7eb'};border-radius:8px;cursor:pointer;background:${p.selected ? '#eff6ff' : 'white'};transition:all 0.15s;`;
         
-        // Posem una classe 'gm-list-thumb' a la imatge per poder-la seleccionar ara mateix
         item.innerHTML = `
             <span class="gm-check" style="font-size:16px;flex-shrink:0;">${p.selected ? '✅' : '☐'}</span>
-            <img src="${p.thumbUrl}" class="gm-list-thumb" style="width:40px;height:40px;object-fit:cover;border-radius:4px;flex-shrink:0;">
-            <div style="flex:1;overflow:hidden;">
+            <img src="${p.thumbUrl}" class="gm-list-thumb" style="width:40px;height:40px;object-fit:cover;border-radius:4px;flex-shrink:0;user-select:none;-webkit-user-drag:none;">
+            <div style="flex:1;overflow:hidden;pointer-events:none;">
                 <div style="font-size:11px;font-weight:bold;color:#374151;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${p.name}</div>
                 <div style="font-size:10px;color:${p.gps ? '#16a34a' : '#9ca3af'};">📍 ${distTxt}</div>
             </div>`;
         
-        // -- INICI DE L'EFECTE LUPA --
+        // -- INICI DE L'EFECTE LUPA (Ratolí i Tàctil) --
         const imgEl = item.querySelector('.gm-list-thumb');
+        const preview = document.getElementById('gm-hover-preview');
+        const previewImg = document.getElementById('gm-hover-preview-img');
         let hoverTimer;
-        
-        imgEl.onmouseenter = (e) => {
-            const preview = document.getElementById('gm-hover-preview');
-            const previewImg = document.getElementById('gm-hover-preview-img');
+
+        const showPreview = (x, y) => {
             if (!preview || !previewImg) return;
-            
-            // Retardem la càrrega 200ms per si només mous el ratolí ràpid per sobre sense voler aturar-te
+            clearTimeout(hoverTimer);
             hoverTimer = setTimeout(() => {
-                // Creem una URL temporal amb l'arxiu ORIGINAL a màxima resolució
-                imgEl._hoverUrl = URL.createObjectURL(p.file);
+                if (!imgEl._hoverUrl) {
+                    imgEl._hoverUrl = URL.createObjectURL(p.file);
+                }
                 previewImg.src = imgEl._hoverUrl;
                 preview.style.display = 'block';
-                preview.style.left = e.clientX + 'px';
-                preview.style.top = e.clientY + 'px';
-            }, 200);
+                preview.style.left = (x - 10) + 'px';
+                preview.style.top = y + 'px';
+            }, 100); // Carrega pràcticament a l'instant
         };
-        
-        imgEl.onmousemove = (e) => {
-            // Fa que la imatge gran persegueixi una mica el ratolí mentre estigui a sobre la miniatura
-            const preview = document.getElementById('gm-hover-preview');
-            if (preview && preview.style.display === 'block') {
-                preview.style.left = e.clientX + 'px';
-                preview.style.top = e.clientY + 'px';
-            }
-        };
-        
-        imgEl.onmouseleave = () => {
+
+        const hidePreview = () => {
             clearTimeout(hoverTimer);
-            const preview = document.getElementById('gm-hover-preview');
             if (preview) preview.style.display = 'none';
-            // Alliberem la memòria en treure el ratolí
             if (imgEl._hoverUrl) {
                 URL.revokeObjectURL(imgEl._hoverUrl);
                 imgEl._hoverUrl = null;
             }
         };
+
+        // 1. Controls per Ordinador (Ratolí)
+        imgEl.addEventListener('mouseenter', (e) => showPreview(e.clientX, e.clientY));
+        imgEl.addEventListener('mousemove', (e) => {
+            if (preview && preview.style.display === 'block') {
+                preview.style.left = (e.clientX - 10) + 'px';
+                preview.style.top = e.clientY + 'px';
+            }
+        });
+        imgEl.addEventListener('mouseleave', hidePreview);
+
+        // 2. Controls per Mòbil/Tauleta (Dit)
+        imgEl.addEventListener('touchstart', (e) => {
+            const touch = e.touches[0];
+            showPreview(touch.clientX, touch.clientY);
+        }, { passive: true });
+        
+        imgEl.addEventListener('touchmove', (e) => {
+            if (preview && preview.style.display === 'block') {
+                e.preventDefault(); // Evita que la llista faci scroll si estàs arrossegant la lupa
+                const touch = e.touches[0];
+                preview.style.left = (touch.clientX - 10) + 'px';
+                preview.style.top = touch.clientY + 'px';
+            }
+        }, { passive: false });
+
+        imgEl.addEventListener('touchend', hidePreview);
+        imgEl.addEventListener('touchcancel', hidePreview);
         // -- FI DE L'EFECTE LUPA --
 
+        // Acció de clicar (seleccionar la foto per importar)
         item.onclick = (e) => {
-            // Evitem que el clic sobre la foto es confongui si estan fent zoom
-            if (e.target !== imgEl) {
-                gmTogglePhoto(idx);
-                if (p.gps && p.marker) _gmMap.flyTo([p.gps.lat, p.gps.lon], 17, { duration: 0.5 });
-            } else {
-                // Si just cliquen la imatge també seleccionem el punt
-                gmTogglePhoto(idx);
-                if (p.gps && p.marker) _gmMap.flyTo([p.gps.lat, p.gps.lon], 17, { duration: 0.5 });
-            }
+            gmTogglePhoto(idx);
+            if (p.gps && p.marker) _gmMap.flyTo([p.gps.lat, p.gps.lon], 17, { duration: 0.5 });
         };
         
         list.appendChild(item);
     });
-}
-
-function gmToggleNoGps(show) {
-    gmRenderList();
 }
 
 function gmSelectAll() {
