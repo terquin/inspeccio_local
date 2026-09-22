@@ -2912,6 +2912,9 @@ function openGalleryMap() {
     _gmPhotos = [];
     document.getElementById('gm-photo-list').innerHTML = '';
     document.getElementById('gm-status').textContent = 'Selecciona les fotos per ubicar-les al mapa';
+    // Restaura el botó de selecció (per si s'havia amagat en una sessió anterior)
+    const wrap = document.getElementById('gm-select-btn-wrap');
+    if (wrap) wrap.style.display = '';
 
     // Inicialitza el mapa si no existeix
     setTimeout(async () => {
@@ -2949,80 +2952,63 @@ async function onGalleryFolderSelected(event) {
     event.target.value = '';
     if (!files.length) return;
 
-    // Filtra només imatges
     const imgFiles = files.filter(f => /\.(jpe?g|png|heic|webp)$/i.test(f.name));
     if (!imgFiles.length) { showNotification('Cap imatge trobada a la selecció', true); return; }
 
-    // Amaga el botó de selecció un cop hi ha fotos
+    // Amaga el botó de selecció i mostra progrés
     const wrap = document.getElementById('gm-select-btn-wrap');
-    if (wrap) wrap.style.display = 'none';    
-    document.getElementById('gm-status').textContent = `Llegint coordenades de ${imgFiles.length} fotos...`;
-    document.getElementById('gallery-map-modal').style.display = 'flex';
+    if (wrap) wrap.style.display = 'none';
 
-    // Inicialitza el mapa si no existeix
-    await new Promise(r => setTimeout(r, 80));
-    if (!_gmMap) {
-        _gmMap = L.map('gallery-map', { zoomControl: true }).setView(
-            currentLat !== null ? [currentLat, currentLon] : [41.7286, 1.8201], 15
-        );
-        L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}', {
-            maxZoom: 22, keepBuffer: 0
-        }).addTo(_gmMap);
-    } else {
-        _gmMap.invalidateSize();
-        if (currentLat !== null) _gmMap.setView([currentLat, currentLon], 15);
-    }
-
-    // Marcador del punt actual (el que s'està editant)
-    if (_gmPuntMarker) { _gmMap.removeLayer(_gmPuntMarker); _gmPuntMarker = null; }
-    if (currentLat !== null) {
-        _gmPuntMarker = L.marker([currentLat, currentLon], {
-            icon: L.divIcon({
-                className: '',
-                html: `<div style="background:#1e3a5f;width:18px;height:18px;border-radius:50%;border:3px solid white;box-shadow:0 0 0 2px #1e3a5f;"></div>`,
-                iconSize: [18, 18], iconAnchor: [9, 9]
-            }),
-            zIndexOffset: 1000
-        }).addTo(_gmMap).bindTooltip('Punt a editar', { permanent: false });
-        document.getElementById('gm-point-label').style.display = 'block';
-    }
+    const statusEl = document.getElementById('gm-status');
 
     // Neteja fotos anteriors
-    _gmPhotos.forEach(p => { if (p.marker) _gmMap.removeLayer(p.marker); });
+    _gmPhotos.forEach(p => {
+        if (p.marker) _gmMap.removeLayer(p.marker);
+        if (p.thumbUrl) URL.revokeObjectURL(p.thumbUrl);
+    });
     _gmPhotos = [];
     document.getElementById('gm-photo-list').innerHTML = '';
 
     const bounds = [];
     if (currentLat !== null) bounds.push([currentLat, currentLon]);
 
-    // Llegeix EXIF i crea miniatures
-    for (const file of imgFiles) {
-        const gps    = await readExifGps(file);
-        const thumbUrl = await createThumb(file);
-        const entry  = { file, name: file.name, gps, marker: null, selected: false, thumbUrl };
-        _gmPhotos.push(entry);
+    // Processa les fotos en lots de 5 per mantenir la UI responsiva
+    const LOT = 5;
+    for (let i = 0; i < imgFiles.length; i += LOT) {
+        const lot = imgFiles.slice(i, Math.min(i + LOT, imgFiles.length));
+        statusEl.textContent = `Llegint fotos ${i + 1}–${Math.min(i + LOT, imgFiles.length)} de ${imgFiles.length}...`;
 
-        if (gps) {
-            bounds.push([gps.lat, gps.lon]);
-            const idx = _gmPhotos.length - 1;
-            const markerHtml = `
-                <div id="gm-marker-${idx}" style="width:54px;height:54px;border-radius:6px;border:3px solid #9ca3af;overflow:hidden;cursor:pointer;box-shadow:0 2px 6px rgba(0,0,0,.3);background:#f3f4f6;">
-                    <img src="${thumbUrl}" style="width:100%;height:100%;object-fit:cover;" draggable="false">
-                </div>`;
-            entry.marker = L.marker([gps.lat, gps.lon], {
-                icon: L.divIcon({ className: '', html: markerHtml, iconSize: [54, 54], iconAnchor: [27, 27] })
-            }).addTo(_gmMap).on('click', () => gmTogglePhoto(idx));
+        // Processa el lot en paral·lel
+        await Promise.all(lot.map(async (file) => {
+            const gps      = await readExifGps(file);
+            const thumbUrl = await createThumb(file);
+            const entry    = { file, name: file.name, gps, marker: null, selected: false, thumbUrl };
 
-            const dist = currentLat !== null
-                ? Math.round(haversineM(currentLat, currentLon, gps.lat, gps.lon))
-                : null;
-            entry.distM = dist;
-        } else {
-            entry.distM = null;
-        }
+            if (gps) {
+                bounds.push([gps.lat, gps.lon]);
+                const idx = _gmPhotos.length;
+                _gmPhotos.push(entry);
+                const markerHtml = `
+                    <div id="gm-marker-${idx}" style="width:48px;height:48px;border-radius:6px;border:3px solid #9ca3af;overflow:hidden;cursor:pointer;box-shadow:0 2px 6px rgba(0,0,0,.3);background:#f3f4f6;">
+                        <img src="${thumbUrl}" style="width:100%;height:100%;object-fit:cover;" draggable="false">
+                    </div>`;
+                entry.marker = L.marker([gps.lat, gps.lon], {
+                    icon: L.divIcon({ className: '', html: markerHtml, iconSize: [48, 48], iconAnchor: [24, 24] })
+                }).addTo(_gmMap).on('click', () => gmTogglePhoto(_gmPhotos.indexOf(entry)));
+                entry.distM = currentLat !== null
+                    ? Math.round(haversineM(currentLat, currentLon, gps.lat, gps.lon))
+                    : null;
+            } else {
+                entry.distM = null;
+                _gmPhotos.push(entry);
+            }
+        }));
+
+        // Pausa breu per actualitzar la UI entre lots
+        await new Promise(r => setTimeout(r, 30));
     }
 
-    // Ordena per distància al punt
+    // Ordena per distància
     _gmPhotos.sort((a, b) => {
         if (a.distM === null && b.distM === null) return a.name.localeCompare(b.name);
         if (a.distM === null) return 1;
@@ -3030,19 +3016,23 @@ async function onGalleryFolderSelected(event) {
         return a.distM - b.distM;
     });
 
-    // Reajusta índexs dels marcadors després d'ordenar
+    // Reajusta índexs dels marcadors al mapa després d'ordenar
     _gmPhotos.forEach((p, idx) => {
         if (p.marker) {
-            const el = p.marker.getElement();
-            if (el) el.querySelector('div').id = `gm-marker-${idx}`;
+            const el = p.marker.getElement()?.querySelector('div');
+            if (el) el.id = `gm-marker-${idx}`;
         }
     });
 
     gmRenderList();
 
-    if (bounds.length > 1) {
-        _gmMap.fitBounds(bounds, { padding: [40, 40] });
-    }
+    if (bounds.length > 1) _gmMap.fitBounds(bounds, { padding: [40, 40] });
+    _gmMap.invalidateSize();
+
+    const ambGps   = _gmPhotos.filter(p => p.gps).length;
+    const senseGps = _gmPhotos.filter(p => !p.gps).length;
+    statusEl.textContent = `${imgFiles.length} fotos · ${ambGps} amb GPS · ${senseGps} sense GPS`;
+}
 
     document.getElementById('gm-status').textContent =
         `${_gmPhotos.filter(p => p.gps).length} amb GPS · ${_gmPhotos.filter(p => !p.gps).length} sense GPS`;
@@ -3175,6 +3165,10 @@ document.addEventListener('visibilitychange', async () => {
                 <span id="gm-status" style="margin-left:12px;font-size:12px;color:#6b7280;"></span>
             </div>
             <div style="display:flex;gap:8px;align-items:center;">
+                <label style="font-size:12px;background:#f5f3ff;color:#7c3aed;border:1px solid #ddd6fe;border-radius:6px;padding:5px 10px;cursor:pointer;display:flex;align-items:center;gap:4px;">
+                    📂 Canviar fotos
+                    <input type="file" accept="image/*" multiple class="hidden" onchange="onGalleryFolderSelected(event)">
+                </label>           
                 <button onclick="gmSelectAll()" style="font-size:12px;background:#eff6ff;color:#3b82f6;border:1px solid #bfdbfe;border-radius:6px;padding:5px 10px;cursor:pointer;">✅ Totes</button>
                 <button onclick="gmSelectNone()" style="font-size:12px;background:#f3f4f6;color:#6b7280;border:1px solid #d1d5db;border-radius:6px;padding:5px 10px;cursor:pointer;">☐ Cap</button>
                 <button onclick="gmConfirm()" style="font-size:12px;background:#3b82f6;color:white;border:none;border-radius:6px;padding:5px 14px;font-weight:bold;cursor:pointer;">Afegir seleccionades →</button>
