@@ -2961,12 +2961,12 @@ function openGalleryMap() {
 
 async function readExifGps(file) {
     try {
-        const slice = file.slice(0, 524288);
+        // Llegim l'arxiu sencer perquè la llibreria piexif pugui validar el JPEG sense errors
         const dataUrl = await new Promise((resolve, reject) => {
             const reader = new FileReader();
             reader.onload = e => resolve(e.target.result);
             reader.onerror = e => reject(e);
-            reader.readAsDataURL(slice);
+            reader.readAsDataURL(file); // Passem el fitxer sencer, sense tallar
         });
 
         const exifData = piexif.load(dataUrl);
