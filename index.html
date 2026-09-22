@@ -2958,6 +2958,39 @@ function openGalleryMap() {
         _gmMap.invalidateSize();
     }, 150);
 }
+
+async function readExifGps(file) {
+
+    // Inicialitza el mapa si no existeix
+    setTimeout(async () => {
+        if (!_gmMap) {
+            _gmMap = L.map('gallery-map', { zoomControl: true }).setView(
+                currentLat !== null ? [currentLat, currentLon] : [41.7286, 1.8201], 15
+            );
+            L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}', {
+                maxZoom: 22, keepBuffer: 0
+            }).addTo(_gmMap);
+        } else {
+            _gmMap.invalidateSize();
+            if (currentLat !== null) _gmMap.setView([currentLat, currentLon], 15);
+        }
+
+        // Marcador del punt actual
+        if (_gmPuntMarker) { _gmMap.removeLayer(_gmPuntMarker); _gmPuntMarker = null; }
+        if (currentLat !== null) {
+            _gmPuntMarker = L.marker([currentLat, currentLon], {
+                icon: L.divIcon({
+                    className: '',
+                    html: `<div style="background:#1e3a5f;width:18px;height:18px;border-radius:50%;border:3px solid white;box-shadow:0 0 0 2px #1e3a5f;"></div>`,
+                    iconSize: [18, 18], iconAnchor: [9, 9]
+                }),
+                zIndexOffset: 1000
+            }).addTo(_gmMap).bindTooltip('Punt a editar', { permanent: false });
+            document.getElementById('gm-point-label').style.display = 'block';
+        }
+        _gmMap.invalidateSize();
+    }, 150);
+}
 async function onGalleryFolderSelected(event) {
     const files = Array.from(event.target.files || []);
     event.target.value = '';
