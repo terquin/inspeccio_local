@@ -2961,9 +2961,7 @@ function openGalleryMap() {
 
 async function readExifGps(file) {
     try {
-        // Llegim els primers 512KB. És instantani i ens assegura agafar tot el bloc de metadades.
         const slice = file.slice(0, 524288);
-        
         const dataUrl = await new Promise((resolve, reject) => {
             const reader = new FileReader();
             reader.onload = e => resolve(e.target.result);
@@ -2971,16 +2969,13 @@ async function readExifGps(file) {
             reader.readAsDataURL(slice);
         });
 
-        // Utilitzem 'piexifjs' (ja carregat al teu HTML) que entén perfectament les coordenades
         const exifData = piexif.load(dataUrl);
         const gps = exifData.GPS;
 
-        // Si la foto no té la informació, ho saltem
         if (!gps || !gps[piexif.GPSIFD.GPSLatitude] || !gps[piexif.GPSIFD.GPSLongitude]) {
             return null;
         }
 
-        // Convertim l'estructura EXIF [graus, minuts, segons] a coordenades decimals
         const parseCoord = (coordArray) => {
             const d = coordArray[0][0] / (coordArray[0][1] || 1);
             const m = coordArray[1][0] / (coordArray[1][1] || 1);
@@ -2991,7 +2986,6 @@ async function readExifGps(file) {
         let lat = parseCoord(gps[piexif.GPSIFD.GPSLatitude]);
         let lon = parseCoord(gps[piexif.GPSIFD.GPSLongitude]);
 
-        // Apliquem la referència N/S i E/W per saber el signe correcte
         const latRef = gps[piexif.GPSIFD.GPSLatitudeRef] || 'N';
         const lonRef = gps[piexif.GPSIFD.GPSLongitudeRef] || 'E';
 
