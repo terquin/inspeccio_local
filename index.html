@@ -3034,11 +3034,7 @@ async function onGalleryFolderSelected(event) {
     statusEl.textContent = `${imgFiles.length} fotos · ${ambGps} amb GPS · ${senseGps} sense GPS`;
 }
 
-    document.getElementById('gm-status').textContent =
-        `${_gmPhotos.filter(p => p.gps).length} amb GPS · ${_gmPhotos.filter(p => !p.gps).length} sense GPS`;
-    _gmMap.invalidateSize();
-}
-
+ 
 function createThumb(file) {
     return new Promise(resolve => {
         const url = URL.createObjectURL(file);
