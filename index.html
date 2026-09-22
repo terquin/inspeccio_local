@@ -2960,37 +2960,98 @@ function openGalleryMap() {
 }
 
 async function readExifGps(file) {
+    try {
+        // Llegim fins a 512KB (en lloc de 128KB) per si el GPS està més al fons de l'arxiu
+        const slice = file.slice(0, 524288);
+        const buf = await slice.arrayBuffer();
+        const view = new DataView(buf);
 
-    // Inicialitza el mapa si no existeix
-    setTimeout(async () => {
-        if (!_gmMap) {
-            _gmMap = L.map('gallery-map', { zoomControl: true }).setView(
-                currentLat !== null ? [currentLat, currentLon] : [41.7286, 1.8201], 15
-            );
-            L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}', {
-                maxZoom: 22, keepBuffer: 0
-            }).addTo(_gmMap);
-        } else {
-            _gmMap.invalidateSize();
-            if (currentLat !== null) _gmMap.setView([currentLat, currentLon], 15);
+        // 1. Comprovem si és un JPEG (ha de començar per FF D8)
+        if (view.getUint16(0, false) !== 0xFFD8) return null;
+
+        let offset = 2;
+        let tiffStart = -1;
+
+        // 2. Busquem on comença el bloc EXIF
+        while (offset < view.byteLength - 4) {
+            const marker = view.getUint16(offset, false);
+            if (marker === 0xFFE1) { // APP1 Marker (EXIF)
+                if (view.getUint32(offset + 4, false) === 0x45786966) { // Paraula "Exif"
+                    tiffStart = offset + 10;
+                    break;
+                }
+            } else if (marker === 0xFFDA) {
+                break; // Hem arribat a la imatge real, ja no hi ha metadades
+            }
+            const segLen = view.getUint16(offset + 2, false);
+            offset += 2 + segLen;
         }
 
-        // Marcador del punt actual
-        if (_gmPuntMarker) { _gmMap.removeLayer(_gmPuntMarker); _gmPuntMarker = null; }
-        if (currentLat !== null) {
-            _gmPuntMarker = L.marker([currentLat, currentLon], {
-                icon: L.divIcon({
-                    className: '',
-                    html: `<div style="background:#1e3a5f;width:18px;height:18px;border-radius:50%;border:3px solid white;box-shadow:0 0 0 2px #1e3a5f;"></div>`,
-                    iconSize: [18, 18], iconAnchor: [9, 9]
-                }),
-                zIndexOffset: 1000
-            }).addTo(_gmMap).bindTooltip('Punt a editar', { permanent: false });
-            document.getElementById('gm-point-label').style.display = 'block';
-        }
-        _gmMap.invalidateSize();
-    }, 150);
+        if (tiffStart < 0) return null;
+
+        // 3. Llegim l'estructura per buscar la secció de GPS
+        const isLittleEndian = view.getUint16(tiffStart, false) === 0x4949;
+        const ifd0Offset = view.getUint32(tiffStart + 4, isLittleEndian);
+
+        const getDir = (dirOffset) => {
+            const count = view.getUint16(tiffStart + dirOffset, isLittleEndian);
+            const tags = {};
+            for (let i = 0; i < count; i++) {
+                const entryOffset = tiffStart + dirOffset + 2 + (i * 12);
+                const tagId = view.getUint16(entryOffset, isLittleEndian);
+                tags[tagId] = entryOffset;
+            }
+            return tags;
+        };
+
+        const ifd0 = getDir(ifd0Offset);
+        if (!ifd0[0x8825]) return null; // 0x8825 és l'etiqueta que conté la info GPS
+
+        const gpsOffset = view.getUint32(ifd0[0x8825] + 8, isLittleEndian);
+        const gpsDir = getDir(gpsOffset);
+
+        // Tags 2 i 4 són Latitud i Longitud
+        if (!gpsDir[2] || !gpsDir[4]) return null;
+
+        // 4. Funció matemàtica per convertir de Format EXIF a Decimal
+        const readGPSCoord = (tagId) => {
+            const entry = gpsDir[tagId];
+            const dataOffset = view.getUint32(entry + 8, isLittleEndian);
+            
+            const dNum = view.getUint32(tiffStart + dataOffset, isLittleEndian);
+            const dDen = view.getUint32(tiffStart + dataOffset + 4, isLittleEndian);
+            const mNum = view.getUint32(tiffStart + dataOffset + 8, isLittleEndian);
+            const mDen = view.getUint32(tiffStart + dataOffset + 12, isLittleEndian);
+            const sNum = view.getUint32(tiffStart + dataOffset + 16, isLittleEndian);
+            const sDen = view.getUint32(tiffStart + dataOffset + 20, isLittleEndian);
+
+            const d = dDen !== 0 ? dNum / dDen : 0;
+            const m = mDen !== 0 ? mNum / mDen : 0;
+            const s = sDen !== 0 ? sNum / sDen : 0;
+
+            return d + (m / 60) + (s / 3600);
+        };
+
+        // Llegeix les direccions N, S, E, O (etiquetes 1 i 3)
+        const latRef = gpsDir[1] ? String.fromCharCode(view.getUint8(gpsDir[1] + 8)) : 'N';
+        const lonRef = gpsDir[3] ? String.fromCharCode(view.getUint8(gpsDir[3] + 8)) : 'E';
+
+        let lat = readGPSCoord(2);
+        let lon = readGPSCoord(4);
+
+        if (latRef === 'S') lat = -lat;
+        if (lonRef === 'W') lon = -lon;
+
+        // Ens assegurem que les dades no estiguin corruptes abans d'enviar-les
+        if (isNaN(lat) || isNaN(lon)) return null;
+
+        return { lat, lon };
+    } catch (e) {
+        console.warn('Error llegint GPS:', e);
+        return null;
+    }
 }
+    
 async function onGalleryFolderSelected(event) {
     const files = Array.from(event.target.files || []);
     event.target.value = '';
