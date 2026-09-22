@@ -2947,6 +2947,89 @@ function openGalleryMap() {
     }, 150);
 }
 
+    async function readExifGps(file) {
+    try {
+        const slice  = file.slice(0, 131072);
+        const buf    = await slice.arrayBuffer();
+        const bytes  = new Uint8Array(buf);
+        const view   = new DataView(buf);
+
+        if (bytes[0] !== 0xFF || bytes[1] !== 0xD8) return null;
+
+        // Busca el segment APP1 (0xFFE1) amb header "Exif\0\0"
+        let offset = 2;
+        let tiffStart = -1;
+        while (offset < bytes.length - 4) {
+            const marker = view.getUint16(offset, false);
+            const segLen = view.getUint16(offset + 2, false);
+            if (marker === 0xFFE1) {
+                const hdr = String.fromCharCode(bytes[offset+4], bytes[offset+5],
+                                                bytes[offset+6], bytes[offset+7]);
+                if (hdr === 'Exif') { tiffStart = offset + 10; break; }
+            }
+            if (marker === 0xFFDA) break;
+            offset += 2 + segLen;
+        }
+        if (tiffStart < 0) return null;
+
+        // Detecta byte order del bloc TIFF (II=LE, MM=BE)
+        const le = bytes[tiffStart] === 0x49 && bytes[tiffStart+1] === 0x49;
+        const r16 = o => view.getUint16(tiffStart + o, le);
+        const r32 = o => view.getUint32(tiffStart + o, le);
+
+        // IFD0 — busca GPS SubIFD (tag 0x8825)
+        const ifd0Off   = r32(4);
+        const ifd0Count = r16(ifd0Off);
+        let gpsIfdOff = -1;
+        for (let i = 0; i < ifd0Count; i++) {
+            const e = ifd0Off + 2 + i * 12;
+            if (r16(e) === 0x8825) { gpsIfdOff = r32(e + 8); break; }
+        }
+        if (gpsIfdOff < 0) return null;
+
+        // GPS IFD — llegeix les entrades
+        const gpsCnt = r16(gpsIfdOff);
+        const gps = {};
+        for (let i = 0; i < gpsCnt; i++) {
+            const e    = gpsIfdOff + 2 + i * 12;
+            const tag  = r16(e);
+            const type = r16(e + 2);
+            const cnt  = r32(e + 4);
+            const vOff = e + 8;
+
+            if (type === 5 && cnt === 3) {
+                // RATIONAL x3 — el camp és un offset al bloc de dades
+                const dataOff = r32(vOff);
+                const rats = [];
+                for (let k = 0; k < 3; k++) {
+                    const num = r32(dataOff + k * 8);
+                    const den = r32(dataOff + k * 8 + 4);
+                    rats.push(den !== 0 ? num / den : 0);
+                }
+                gps[tag] = rats;
+            } else if (type === 2) {
+                // ASCII inline — el caràcter és el primer byte del camp valor
+                gps[tag] = String.fromCharCode(bytes[vOff]);
+            }
+        }
+
+        if (!gps[2] || !gps[4]) return null;
+
+        const toDecimal = (rats, ref) => {
+            const dec = rats[0] + rats[1] / 60 + rats[2] / 3600;
+            return (ref === 'S' || ref === 'W') ? -dec : dec;
+        };
+
+        return {
+            lat: toDecimal(gps[2], gps[1] || 'N'),
+            lon: toDecimal(gps[4], gps[3] || 'E')
+        };
+
+    } catch (e) {
+        console.warn('readExifGps error:', e);
+        return null;
+    }
+}
 async function onGalleryFolderSelected(event) {
     const files = Array.from(event.target.files || []);
     event.target.value = '';
